@@ -1,11 +1,14 @@
-name: AI Code Reviewer
+name: AI Code Review
 
 on:
   pull_request:
     types:
       - opened
       - synchronize
+      - reopened
+
 permissions: write-all
+
 jobs:
   review:
     runs-on: ubuntu-latest
@@ -17,8 +20,8 @@ jobs:
         uses: qiancai/ai-codereviewer@test
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          API_PROVIDER: "deepseek"
+          API_PROVIDER: "deepseek"  # or "openai" if you want to use OpenAI
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DEEPSEEK_API_MODEL: "deepseek-coder-33b-instruct" # Optional: defaults to "deepseek-coder-33b-instruct"
-          exclude: "**/*.json" # Optional: exclude patterns separated by commas
+          DEEPSEEK_API_MODEL: "deepseek-chat"  # Updated model name
+          exclude: "**/*.json"  # Optional: exclude patterns separated by commas
 
