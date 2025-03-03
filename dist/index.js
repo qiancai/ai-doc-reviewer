@@ -29,15 +29,6 @@ var __importStar = (this && this.__importStar) || function (mod) {
     __setModuleDefault(result, mod);
     return result;
 };
-var __awaiter = (this && this.__awaiter) || function (thisArg, _arguments, P, generator) {
-    function adopt(value) { return value instanceof P ? value : new P(function (resolve) { resolve(value); }); }
-    return new (P || (P = Promise))(function (resolve, reject) {
-        function fulfilled(value) { try { step(generator.next(value)); } catch (e) { reject(e); } }
-        function rejected(value) { try { step(generator["throw"](value)); } catch (e) { reject(e); } }
-        function step(result) { result.done ? resolve(result.value) : adopt(result.value).then(fulfilled, rejected); }
-        step((generator = generator.apply(thisArg, _arguments || [])).next());
-    });
-};
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
@@ -49,61 +40,59 @@ const rest_1 = __nccwpck_require__(5375);
 const parse_diff_1 = __importDefault(__nccwpck_require__(4833));
 const minimatch_1 = __importDefault(__nccwpck_require__(2002));
 const GITHUB_TOKEN = core.getInput("GITHUB_TOKEN");
+const API_PROVIDER = core.getInput("API_PROVIDER") || "openai";
 const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
+const DEEPSEEK_API_KEY = core.getInput("DEEPSEEK_API_KEY");
+const DEEPSEEK_API_MODEL = core.getInput("DEEPSEEK_API_MODEL");
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
-const openai = new openai_1.default({
-    apiKey: OPENAI_API_KEY,
-});
-function getPRDetails() {
+// Initialize OpenAI client if using OpenAI
+const openai = API_PROVIDER === "openai"
+    ? new openai_1.default({ apiKey: OPENAI_API_KEY })
+    : null;
+async function getPRDetails() {
     var _a, _b;
-    return __awaiter(this, void 0, void 0, function* () {
-        const { repository, number } = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH || "", "utf8"));
-        const prResponse = yield octokit.pulls.get({
-            owner: repository.owner.login,
-            repo: repository.name,
-            pull_number: number,
-        });
-        return {
-            owner: repository.owner.login,
-            repo: repository.name,
-            pull_number: number,
-            title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
-            description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
-        };
+    const { repository, number } = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH || "", "utf8"));
+    const prResponse = await octokit.pulls.get({
+        owner: repository.owner.login,
+        repo: repository.name,
+        pull_number: number,
     });
+    return {
+        owner: repository.owner.login,
+        repo: repository.name,
+        pull_number: number,
+        title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
+        description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
+    };
 }
-function getDiff(owner, repo, pull_number) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const response = yield octokit.pulls.get({
-            owner,
-            repo,
-            pull_number,
-            mediaType: { format: "diff" },
-        });
-        // @ts-expect-error - response.data is a string
-        return response.data;
+async function getDiff(owner, repo, pull_number) {
+    const response = await octokit.pulls.get({
+        owner,
+        repo,
+        pull_number,
+        mediaType: { format: "diff" },
     });
+    // @ts-expect-error - response.data is a string
+    return response.data;
 }
-function analyzeCode(parsedDiff, prDetails) {
-    return __awaiter(this, void 0, void 0, function* () {
-        const comments = [];
-        for (const file of parsedDiff) {
-            if (file.to === "/dev/null")
-                continue; // Ignore deleted files
-            for (const chunk of file.chunks) {
-                const prompt = createPrompt(file, chunk, prDetails);
-                const aiResponse = yield getAIResponse(prompt);
-                if (aiResponse) {
-                    const newComments = createComment(file, chunk, aiResponse);
-                    if (newComments) {
-                        comments.push(...newComments);
-                    }
+async function analyzeCode(parsedDiff, prDetails) {
+    const comments = [];
+    for (const file of parsedDiff) {
+        if (file.to === "/dev/null")
+            continue; // Ignore deleted files
+        for (const chunk of file.chunks) {
+            const prompt = createPrompt(file, chunk, prDetails);
+            const aiResponse = await getAIResponse(prompt);
+            if (aiResponse) {
+                const newComments = createComment(file, chunk, aiResponse);
+                if (newComments) {
+                    comments.push(...newComments);
                 }
             }
         }
-        return comments;
-    });
+    }
+    return comments;
 }
 function createPrompt(file, chunk, prDetails) {
     return `Your task is to review pull requests. Instructions:
@@ -134,37 +123,112 @@ ${chunk.changes
 \`\`\`
 `;
 }
-function getAIResponse(prompt) {
+async function getAIResponse(prompt) {
+    if (API_PROVIDER === "openai") {
+        return getOpenAIResponse(prompt);
+    }
+    else if (API_PROVIDER === "deepseek") {
+        return getDeepseekResponse(prompt);
+    }
+    else {
+        console.error(`Unsupported API provider: ${API_PROVIDER}`);
+        return null;
+    }
+}
+async function getOpenAIResponse(prompt) {
     var _a, _b;
-    return __awaiter(this, void 0, void 0, function* () {
-        const queryConfig = {
-            model: OPENAI_API_MODEL,
-            temperature: 0.2,
-            max_tokens: 700,
-            top_p: 1,
-            frequency_penalty: 0,
-            presence_penalty: 0,
-        };
-        try {
-            const response = yield openai.chat.completions.create(Object.assign(Object.assign(Object.assign({}, queryConfig), (OPENAI_API_MODEL === "gpt-4-1106-preview"
+    if (!openai) {
+        console.error("OpenAI client not initialized");
+        return null;
+    }
+    const queryConfig = {
+        model: OPENAI_API_MODEL,
+        temperature: 0.2,
+        max_tokens: 700,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0,
+    };
+    try {
+        const response = await openai.chat.completions.create({
+            ...queryConfig,
+            // return JSON if the model supports it:
+            ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
                 ? { response_format: { type: "json_object" } }
-                : {})), { messages: [
+                : {}),
+            messages: [
+                {
+                    role: "system",
+                    content: prompt,
+                },
+            ],
+        });
+        const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
+        return JSON.parse(res).reviews;
+    }
+    catch (error) {
+        console.error("Error with OpenAI API:", error);
+        return null;
+    }
+}
+async function getDeepseekResponse(prompt) {
+    if (!DEEPSEEK_API_KEY) {
+        console.error("Deepseek API key not provided");
+        return null;
+    }
+    try {
+        const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+            method: "POST",
+            headers: {
+                "Content-Type": "application/json",
+                "Authorization": `Bearer ${DEEPSEEK_API_KEY}`
+            },
+            body: JSON.stringify({
+                model: DEEPSEEK_API_MODEL,
+                messages: [
                     {
                         role: "system",
-                        content: prompt,
-                    },
-                ] }));
-            const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
-            return JSON.parse(res).reviews;
+                        content: prompt
+                    }
+                ],
+                temperature: 0.2,
+                max_tokens: 700,
+                top_p: 1,
+                frequency_penalty: 0,
+                presence_penalty: 0
+            })
+        });
+        if (!response.ok) {
+            throw new Error(`Deepseek API error: ${response.status} ${response.statusText}`);
         }
-        catch (error) {
-            console.error("Error:", error);
+        const data = await response.json();
+        const content = data.choices[0].message.content.trim() || "{}";
+        try {
+            return JSON.parse(content).reviews;
+        }
+        catch (parseError) {
+            console.error("Error parsing Deepseek response as JSON:", parseError);
+            // Attempt to extract JSON from the response if it's not properly formatted
+            const jsonMatch = content.match(/\{[\s\S]*\}/);
+            if (jsonMatch) {
+                try {
+                    return JSON.parse(jsonMatch[0]).reviews;
+                }
+                catch (e) {
+                    console.error("Failed to extract JSON from response:", e);
+                    return null;
+                }
+            }
             return null;
         }
-    });
+    }
+    catch (error) {
+        console.error("Error with Deepseek API:", error);
+        return null;
+    }
 }
 function createComment(file, chunk, aiResponses) {
-    return aiResponses.flatMap((aiResponse) => {
+    return aiResponses.map((aiResponse) => {
         if (!file.to) {
             return [];
         }
@@ -173,63 +237,68 @@ function createComment(file, chunk, aiResponses) {
             path: file.to,
             line: Number(aiResponse.lineNumber),
         };
+    }).flat();
+}
+async function createReviewComment(owner, repo, pull_number, comments) {
+    await octokit.pulls.createReview({
+        owner,
+        repo,
+        pull_number,
+        comments,
+        event: "COMMENT",
     });
 }
-function createReviewComment(owner, repo, pull_number, comments) {
-    return __awaiter(this, void 0, void 0, function* () {
-        yield octokit.pulls.createReview({
-            owner,
-            repo,
-            pull_number,
-            comments,
-            event: "COMMENT",
-        });
-    });
-}
-function main() {
+async function main() {
     var _a;
-    return __awaiter(this, void 0, void 0, function* () {
-        const prDetails = yield getPRDetails();
-        let diff;
-        const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
-        if (eventData.action === "opened") {
-            diff = yield getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
-        }
-        else if (eventData.action === "synchronize") {
-            const newBaseSha = eventData.before;
-            const newHeadSha = eventData.after;
-            const response = yield octokit.repos.compareCommits({
-                headers: {
-                    accept: "application/vnd.github.v3.diff",
-                },
-                owner: prDetails.owner,
-                repo: prDetails.repo,
-                base: newBaseSha,
-                head: newHeadSha,
-            });
-            diff = String(response.data);
-        }
-        else {
-            console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
-            return;
-        }
-        if (!diff) {
-            console.log("No diff found");
-            return;
-        }
-        const parsedDiff = (0, parse_diff_1.default)(diff);
-        const excludePatterns = core
-            .getInput("exclude")
-            .split(",")
-            .map((s) => s.trim());
-        const filteredDiff = parsedDiff.filter((file) => {
-            return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
+    // Validate API provider configuration
+    if (API_PROVIDER === "openai" && !OPENAI_API_KEY) {
+        core.setFailed("OPENAI_API_KEY is required when API_PROVIDER is set to 'openai'");
+        return;
+    }
+    if (API_PROVIDER === "deepseek" && !DEEPSEEK_API_KEY) {
+        core.setFailed("DEEPSEEK_API_KEY is required when API_PROVIDER is set to 'deepseek'");
+        return;
+    }
+    const prDetails = await getPRDetails();
+    let diff;
+    const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
+    if (eventData.action === "opened") {
+        diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+    }
+    else if (eventData.action === "synchronize") {
+        const newBaseSha = eventData.before;
+        const newHeadSha = eventData.after;
+        const response = await octokit.repos.compareCommits({
+            headers: {
+                accept: "application/vnd.github.v3.diff",
+            },
+            owner: prDetails.owner,
+            repo: prDetails.repo,
+            base: newBaseSha,
+            head: newHeadSha,
         });
-        const comments = yield analyzeCode(filteredDiff, prDetails);
-        if (comments.length > 0) {
-            yield createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-        }
+        diff = String(response.data);
+    }
+    else {
+        console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+        return;
+    }
+    if (!diff) {
+        console.log("No diff found");
+        return;
+    }
+    const parsedDiff = (0, parse_diff_1.default)(diff);
+    const excludePatterns = core
+        .getInput("exclude")
+        .split(",")
+        .map((s) => s.trim());
+    const filteredDiff = parsedDiff.filter((file) => {
+        return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
     });
+    const comments = await analyzeCode(filteredDiff, prDetails);
+    if (comments.length > 0) {
+        await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+    }
 }
 main().catch((error) => {
     console.error("Error:", error);

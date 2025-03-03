@@ -1,16 +1,27 @@
 name: "AI Code Review Action"
-description: "Perform code reviews and comment on diffs using OpenAI API."
+description: "Perform code reviews and comment on diffs using OpenAI or Deepseek API."
 inputs:
   GITHUB_TOKEN:
     description: "GitHub token to interact with the repository."
     required: true
+  API_PROVIDER:
+    description: "API provider to use for code review (openai or deepseek)."
+    required: false
+    default: "openai"
   OPENAI_API_KEY:
-    description: "OpenAI API key for GPT."
-    required: true
+    description: "OpenAI API key for GPT (required if API_PROVIDER is openai)."
+    required: false
   OPENAI_API_MODEL:
     description: "OpenAI API model."
     required: false
     default: "gpt-4"
+  DEEPSEEK_API_KEY:
+    description: "Deepseek API key (required if API_PROVIDER is deepseek)."
+    required: false
+  DEEPSEEK_API_MODEL:
+    description: "Deepseek API model."
+    required: false
+    default: "deepseek-coder-33b-instruct"
   exclude:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
