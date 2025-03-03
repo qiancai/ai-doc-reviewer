@@ -79,7 +79,7 @@ jobs:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           API_PROVIDER: "deepseek"
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DEEPSEEK_API_MODEL: "deepseek-coder-33b-instruct" # Optional: defaults to "deepseek-coder-33b-instruct"
+          DEEPSEEK_API_MODEL: "deepseek-chat" # Optional: defaults to "deepseek-chat"
           exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
 ```
 

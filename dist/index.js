@@ -44,7 +44,7 @@ const API_PROVIDER = core.getInput("API_PROVIDER") || "openai";
 const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
 const DEEPSEEK_API_KEY = core.getInput("DEEPSEEK_API_KEY");
-const DEEPSEEK_API_MODEL = core.getInput("DEEPSEEK_API_MODEL");
+const DEEPSEEK_API_MODEL = core.getInput("DEEPSEEK_API_MODEL") || "deepseek-chat";
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
 // Initialize OpenAI client if using OpenAI
 const openai = API_PROVIDER === "openai"
@@ -192,12 +192,14 @@ async function getOpenAIResponse(prompt) {
     }
 }
 async function getDeepseekResponse(prompt) {
+    var _a, _b;
     if (!DEEPSEEK_API_KEY) {
         console.error("Deepseek API key not provided");
         return null;
     }
     try {
         console.log("Calling Deepseek API...");
+        console.log("Available Deepseek models: deepseek-chat, deepseek-coder");
         const requestBody = {
             model: DEEPSEEK_API_MODEL,
             messages: [
@@ -213,6 +215,12 @@ async function getDeepseekResponse(prompt) {
             presence_penalty: 0
         };
         console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
+        console.log("Request body structure:", JSON.stringify({
+            model: DEEPSEEK_API_MODEL,
+            messages: [{ role: "user", content: "prompt content (truncated)" }],
+            temperature: 0.2,
+            max_tokens: 700
+        }));
         const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
             method: "POST",
             headers: {
@@ -223,10 +231,17 @@ async function getDeepseekResponse(prompt) {
         });
         if (!response.ok) {
             const errorText = await response.text();
+            console.error(`Deepseek API error response: ${errorText}`);
             throw new Error(`Deepseek API error: ${response.status} ${response.statusText}\nDetails: ${errorText}`);
         }
         const data = await response.json();
         console.log("Deepseek API response received");
+        console.log("Response structure:", JSON.stringify({
+            id: data.id,
+            object: data.object,
+            model: data.model,
+            choices: data.choices ? [{ index: 0, message: { role: (_b = (_a = data.choices[0]) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.role } }] : null
+        }));
         if (!data.choices || !data.choices[0] || !data.choices[0].message) {
             console.error("Unexpected Deepseek API response format:", JSON.stringify(data));
             return null;

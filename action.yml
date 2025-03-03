@@ -17,11 +17,11 @@ inputs:
     default: "gpt-4"
   DEEPSEEK_API_KEY:
     description: "Deepseek API key (required if API_PROVIDER is deepseek)."
-    required: true
+    required: false
   DEEPSEEK_API_MODEL:
     description: "Deepseek API model."
     required: false
-    default: "deepseek-coder-33b-instruct"
+    default: "deepseek-chat"
   exclude:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
