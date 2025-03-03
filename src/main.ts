@@ -349,41 +349,9 @@ function createComment(
       const replaceWithMatch = body.match(/replace with ['"]?([^'".,]+)['"]?/i);
       
       if (shouldBeMatch && shouldBeMatch[1]) {
-        // For "should be X" pattern, try to preserve the structure of the original line
+        // Simple replacement suggestion
         const suggestion = shouldBeMatch[1].trim();
-        
-        // If the suggestion contains the original content structure (like headings),
-        // use it directly, otherwise try to replace just the relevant part
-        if (suggestion.includes('#') || suggestion.startsWith(lineContent.trim().charAt(0))) {
-          body += `\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``;
-        } else {
-          // Try to preserve the original line structure (spaces, symbols, etc.)
-          const originalWords = lineContent.trim().split(/\s+/);
-          const suggestionWords = suggestion.split(/\s+/);
-          
-          // If we have a simple word replacement and structure is similar
-          if (originalWords.length === suggestionWords.length) {
-            body += `\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``;
-          } else {
-            // Try to identify what part needs to be replaced
-            const leadingWhitespace = lineContent.match(/^\s*/)?.[0] || "";
-            const commonPrefix = findCommonPrefix(lineContent.trim(), suggestion);
-            
-            if (commonPrefix.length > 0) {
-              const restOfLine = lineContent.trim().substring(commonPrefix.length);
-              const restOfSuggestion = suggestion.substring(commonPrefix.length);
-              
-              if (restOfLine.length > 0 && restOfSuggestion.length > 0) {
-                const newLine = leadingWhitespace + lineContent.trim().replace(restOfLine, restOfSuggestion);
-                body += `\n\n\`\`\`suggestion\n${newLine}\n\`\`\``;
-              } else {
-                body += `\n\n\`\`\`suggestion\n${leadingWhitespace}${suggestion}\n\`\`\``;
-              }
-            } else {
-              body += `\n\n\`\`\`suggestion\n${leadingWhitespace}${suggestion}\n\`\`\``;
-            }
-          }
-        }
+        body += `\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``;
       } else if (changeToMatch && changeToMatch[1] && changeToMatch[2]) {
         // Try to replace specific text
         const oldText = changeToMatch[1].trim();
@@ -418,55 +386,11 @@ function createComment(
         }
       }
       
-      // Special case for Chinese text patterns
-      
-      // Case 1: 架构设 -> 架构设计
+      // Special case for Chinese text like in your example (架构设 -> 架构设计)
       if (lineContent.includes("架构设") && !lineContent.includes("架构设计") && 
           (body.includes("架构设计") || body.toLowerCase().includes("incomplete"))) {
         const suggestedLine = lineContent.replace("架构设", "架构设计");
         body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-      }
-      
-      // Case 2: 新老架对比 -> 新老架构对比
-      if (lineContent.includes("新老架对比") && !lineContent.includes("新老架构对比") && 
-          body.includes("新老架构对比")) {
-        const suggestedLine = lineContent.replace("新老架对比", "新老架构对比");
-        body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-      }
-      
-      // Extract specific Chinese characters from the comment if they appear to be corrections
-      const chineseCharMatch = body.match(/[""']([^""']+[\u4e00-\u9fa5]+[^""']*)[""']/);
-      if (chineseCharMatch && chineseCharMatch[1]) {
-        const suggestedText = chineseCharMatch[1].trim();
-        // Only use if it's a reasonable length and contains Chinese characters
-        if (suggestedText.length > 0 && suggestedText.length < lineContent.length * 2) {
-          // Check if it's a heading (starts with #)
-          if (lineContent.trim().startsWith('#') && suggestedText.includes('#')) {
-            body += `\n\n\`\`\`suggestion\n${suggestedText}\n\`\`\``;
-          } else {
-            // Try to find what part of the line needs to be replaced
-            const words = lineContent.trim().split(/\s+/);
-            for (const word of words) {
-              if (word.length > 1 && suggestedText.includes(word)) {
-                const suggestedLine = lineContent.replace(word, suggestedText);
-                body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-                break;
-              }
-            }
-          }
-        }
-      }
-      
-      // Handle the specific case in the image: ## 新老架对比 -> ## 新老架构对比
-      if (lineContent.includes("## 新老架对比")) {
-        const suggestedLine = lineContent.replace("## 新老架对比", "## 新老架构对比");
-        // Replace any existing suggestion to ensure we don't have duplicates
-        if (!body.includes("```suggestion")) {
-          body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-        } else {
-          // Replace existing suggestion
-          body = body.replace(/```suggestion\n.*\n```/s, `\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``);
-        }
       }
     }
     
@@ -476,15 +400,6 @@ function createComment(
       line: lineNumber,
     };
   }).flat();
-}
-
-// Helper function to find common prefix between two strings
-function findCommonPrefix(str1: string, str2: string): string {
-  let i = 0;
-  while (i < str1.length && i < str2.length && str1.charAt(i) === str2.charAt(i)) {
-    i++;
-  }
-  return str1.substring(0, i);
 }
 
 // Helper function to get line number from different change types
