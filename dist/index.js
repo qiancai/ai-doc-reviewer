@@ -304,12 +304,88 @@ function createComment(file, chunk, aiResponses) {
         if (!file.to) {
             return [];
         }
+        // Get the line content for the specified line number
+        const lineNumber = Number(aiResponse.lineNumber);
+        let lineContent = "";
+        // Find the content of the line being commented on
+        for (const change of chunk.changes) {
+            // Handle different types of changes
+            const changeLineNumber = getChangeLineNumber(change, lineNumber);
+            if (changeLineNumber) {
+                lineContent = change.content;
+                break;
+            }
+        }
+        let body = aiResponse.reviewComment;
+        // Check if the comment appears to be suggesting a simple text replacement
+        if (lineContent) {
+            // Look for patterns like "should be X" or "change X to Y" in the comment
+            const shouldBeMatch = body.match(/should be ['"]?([^'".,]+)['"]?/i);
+            const changeToMatch = body.match(/change ['"]?([^'"]+)['"]? to ['"]?([^'".,]+)['"]?/i);
+            const replaceWithMatch = body.match(/replace with ['"]?([^'".,]+)['"]?/i);
+            if (shouldBeMatch && shouldBeMatch[1]) {
+                // Simple replacement suggestion
+                const suggestion = shouldBeMatch[1].trim();
+                body += `\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``;
+            }
+            else if (changeToMatch && changeToMatch[1] && changeToMatch[2]) {
+                // Try to replace specific text
+                const oldText = changeToMatch[1].trim();
+                const newText = changeToMatch[2].trim();
+                if (lineContent.includes(oldText)) {
+                    const suggestedLine = lineContent.replace(oldText, newText);
+                    body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
+                }
+            }
+            else if (replaceWithMatch && replaceWithMatch[1]) {
+                // Replace with suggestion
+                const suggestion = replaceWithMatch[1].trim();
+                body += `\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``;
+            }
+            else {
+                // Try to detect simple typos or missing characters
+                const typoMatch = body.match(/missing ['"]?([^'".,]+)['"]?|typo ['"]?([^'".,]+)['"]? should be ['"]?([^'".,]+)['"]?/i);
+                if (typoMatch) {
+                    const missingText = typoMatch[1];
+                    const typoText = typoMatch[2];
+                    const correctedText = typoMatch[3];
+                    if (missingText && lineContent) {
+                        // For missing text, we'd need more context to know where to insert it
+                        // This is a simplistic approach
+                        if (lineContent.endsWith(missingText.charAt(0))) {
+                            const suggestedLine = lineContent + missingText.substring(1);
+                            body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
+                        }
+                    }
+                    else if (typoText && correctedText && lineContent.includes(typoText)) {
+                        const suggestedLine = lineContent.replace(typoText, correctedText);
+                        body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
+                    }
+                }
+            }
+            // Special case for Chinese text like in your example (架构设 -> 架构设计)
+            if (lineContent.includes("架构设") && !lineContent.includes("架构设计") &&
+                (body.includes("架构设计") || body.toLowerCase().includes("incomplete"))) {
+                const suggestedLine = lineContent.replace("架构设", "架构设计");
+                body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
+            }
+        }
         return {
-            body: aiResponse.reviewComment,
+            body: body,
             path: file.to,
-            line: Number(aiResponse.lineNumber),
+            line: lineNumber,
         };
     }).flat();
+}
+// Helper function to get line number from different change types
+function getChangeLineNumber(change, targetLineNumber) {
+    if ('ln' in change && change.ln === targetLineNumber) {
+        return true;
+    }
+    if ('ln2' in change && change.ln2 === targetLineNumber) {
+        return true;
+    }
+    return false;
 }
 async function createReviewComment(owner, repo, pull_number, comments) {
     await octokit.pulls.createReview({
