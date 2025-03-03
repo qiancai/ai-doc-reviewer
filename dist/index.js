@@ -301,7 +301,6 @@ async function getDeepseekResponse(prompt) {
 }
 function createComment(file, chunk, aiResponses) {
     return aiResponses.map((aiResponse) => {
-        var _a;
         if (!file.to) {
             return [];
         }
@@ -318,131 +317,56 @@ function createComment(file, chunk, aiResponses) {
             }
         }
         let body = aiResponse.reviewComment;
-        // Check if the comment appears to be suggesting a simple text replacement
-        if (lineContent) {
-            // Look for patterns like "should be X" or "change X to Y" in the comment
-            const shouldBeMatch = body.match(/should be ['"]?([^'".,]+)['"]?/i);
-            const changeToMatch = body.match(/change ['"]?([^'"]+)['"]? to ['"]?([^'".,]+)['"]?/i);
-            const replaceWithMatch = body.match(/replace with ['"]?([^'".,]+)['"]?/i);
-            if (shouldBeMatch && shouldBeMatch[1]) {
-                // For "should be X" pattern, try to preserve the structure of the original line
-                const suggestion = shouldBeMatch[1].trim();
-                // If the suggestion contains the original content structure (like headings),
-                // use it directly, otherwise try to replace just the relevant part
-                if (suggestion.includes('#') || suggestion.startsWith(lineContent.trim().charAt(0))) {
-                    body += `\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``;
-                }
-                else {
-                    // Try to preserve the original line structure (spaces, symbols, etc.)
-                    const originalWords = lineContent.trim().split(/\s+/);
-                    const suggestionWords = suggestion.split(/\s+/);
-                    // If we have a simple word replacement and structure is similar
-                    if (originalWords.length === suggestionWords.length) {
-                        body += `\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``;
-                    }
-                    else {
-                        // Try to identify what part needs to be replaced
-                        const leadingWhitespace = ((_a = lineContent.match(/^\s*/)) === null || _a === void 0 ? void 0 : _a[0]) || "";
-                        const commonPrefix = findCommonPrefix(lineContent.trim(), suggestion);
-                        if (commonPrefix.length > 0) {
-                            const restOfLine = lineContent.trim().substring(commonPrefix.length);
-                            const restOfSuggestion = suggestion.substring(commonPrefix.length);
-                            if (restOfLine.length > 0 && restOfSuggestion.length > 0) {
-                                const newLine = leadingWhitespace + lineContent.trim().replace(restOfLine, restOfSuggestion);
-                                body += `\n\n\`\`\`suggestion\n${newLine}\n\`\`\``;
-                            }
-                            else {
-                                body += `\n\n\`\`\`suggestion\n${leadingWhitespace}${suggestion}\n\`\`\``;
-                            }
-                        }
-                        else {
-                            body += `\n\n\`\`\`suggestion\n${leadingWhitespace}${suggestion}\n\`\`\``;
+        // Only add suggestion if we have line content to work with
+        if (lineContent && lineContent.trim().length > 0) {
+            // Extract suggestion from the review comment
+            const extractSuggestion = (comment) => {
+                // Common patterns for suggestions in review comments
+                const patterns = [
+                    // "X should be Y" pattern
+                    { regex: /['"]?([^'"]+)['"]? should be ['"]?([^'"]+)['"]?/i, oldGroup: 1, newGroup: 2 },
+                    // "change X to Y" pattern
+                    { regex: /change ['"]?([^'"]+)['"]? to ['"]?([^'"]+)['"]?/i, oldGroup: 1, newGroup: 2 },
+                    // "X instead of Y" pattern
+                    { regex: /['"]?([^'"]+)['"]? instead of ['"]?([^'"]+)['"]?/i, oldGroup: 2, newGroup: 1 },
+                    // Chinese patterns
+                    { regex: /['"]?([^'"]+)['"]? 应为 ['"]?([^'"]+)['"]?/i, oldGroup: 1, newGroup: 2 },
+                    { regex: /['"]?([^'"]+)['"]? 改为 ['"]?([^'"]+)['"]?/i, oldGroup: 1, newGroup: 2 },
+                    { regex: /将 ['"]?([^'"]+)['"]? 改为 ['"]?([^'"]+)['"]?/i, oldGroup: 1, newGroup: 2 }
+                ];
+                for (const pattern of patterns) {
+                    const match = comment.match(pattern.regex);
+                    if (match && match[pattern.oldGroup] && match[pattern.newGroup]) {
+                        const oldText = match[pattern.oldGroup].trim();
+                        const newText = match[pattern.newGroup].trim();
+                        // Only proceed if the old text is actually in the line content
+                        if (lineContent.includes(oldText)) {
+                            return lineContent.replace(oldText, newText);
                         }
                     }
                 }
-            }
-            else if (changeToMatch && changeToMatch[1] && changeToMatch[2]) {
-                // Try to replace specific text
-                const oldText = changeToMatch[1].trim();
-                const newText = changeToMatch[2].trim();
-                if (lineContent.includes(oldText)) {
-                    const suggestedLine = lineContent.replace(oldText, newText);
-                    body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-                }
-            }
-            else if (replaceWithMatch && replaceWithMatch[1]) {
-                // Replace with suggestion
-                const suggestion = replaceWithMatch[1].trim();
-                body += `\n\n\`\`\`suggestion\n${suggestion}\n\`\`\``;
-            }
-            else {
-                // Try to detect simple typos or missing characters
-                const typoMatch = body.match(/missing ['"]?([^'".,]+)['"]?|typo ['"]?([^'".,]+)['"]? should be ['"]?([^'".,]+)['"]?/i);
-                if (typoMatch) {
-                    const missingText = typoMatch[1];
-                    const typoText = typoMatch[2];
-                    const correctedText = typoMatch[3];
-                    if (missingText && lineContent) {
-                        // For missing text, we'd need more context to know where to insert it
-                        // This is a simplistic approach
-                        if (lineContent.endsWith(missingText.charAt(0))) {
-                            const suggestedLine = lineContent + missingText.substring(1);
-                            body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-                        }
-                    }
-                    else if (typoText && correctedText && lineContent.includes(typoText)) {
-                        const suggestedLine = lineContent.replace(typoText, correctedText);
-                        body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
+                // If no pattern matched, look for quoted text that might be a suggestion
+                const quotedTextMatch = comment.match(/['"]([^'"]+)['"]/g);
+                if (quotedTextMatch && quotedTextMatch.length === 1) {
+                    // If there's only one quoted text, it might be a suggestion for the entire line
+                    const suggestion = quotedTextMatch[0].replace(/^['"]|['"]$/g, '').trim();
+                    if (suggestion && suggestion !== lineContent.trim()) {
+                        return suggestion;
                     }
                 }
-            }
-            // Special case for Chinese text patterns
-            // Case 1: 架构设 -> 架构设计
-            if (lineContent.includes("架构设") && !lineContent.includes("架构设计") &&
-                (body.includes("架构设计") || body.toLowerCase().includes("incomplete"))) {
-                const suggestedLine = lineContent.replace("架构设", "架构设计");
-                body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-            }
-            // Case 2: 新老架对比 -> 新老架构对比
-            if (lineContent.includes("新老架对比") && !lineContent.includes("新老架构对比") &&
-                body.includes("新老架构对比")) {
-                const suggestedLine = lineContent.replace("新老架对比", "新老架构对比");
-                body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-            }
-            // Extract specific Chinese characters from the comment if they appear to be corrections
-            const chineseCharMatch = body.match(/[""']([^""']+[\u4e00-\u9fa5]+[^""']*)[""']/);
-            if (chineseCharMatch && chineseCharMatch[1]) {
-                const suggestedText = chineseCharMatch[1].trim();
-                // Only use if it's a reasonable length and contains Chinese characters
-                if (suggestedText.length > 0 && suggestedText.length < lineContent.length * 2) {
-                    // Check if it's a heading (starts with #)
-                    if (lineContent.trim().startsWith('#') && suggestedText.includes('#')) {
-                        body += `\n\n\`\`\`suggestion\n${suggestedText}\n\`\`\``;
-                    }
-                    else {
-                        // Try to find what part of the line needs to be replaced
-                        const words = lineContent.trim().split(/\s+/);
-                        for (const word of words) {
-                            if (word.length > 1 && suggestedText.includes(word)) {
-                                const suggestedLine = lineContent.replace(word, suggestedText);
-                                body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-                                break;
-                            }
-                        }
+                else if (quotedTextMatch && quotedTextMatch.length === 2) {
+                    // If there are two quoted texts, the second might be the suggestion for the first
+                    const oldText = quotedTextMatch[0].replace(/^['"]|['"]$/g, '').trim();
+                    const newText = quotedTextMatch[1].replace(/^['"]|['"]$/g, '').trim();
+                    if (lineContent.includes(oldText)) {
+                        return lineContent.replace(oldText, newText);
                     }
                 }
-            }
-            // Handle the specific case in the image: ## 新老架对比 -> ## 新老架构对比
-            if (lineContent.includes("## 新老架对比")) {
-                const suggestedLine = lineContent.replace("## 新老架对比", "## 新老架构对比");
-                // Replace any existing suggestion to ensure we don't have duplicates
-                if (!body.includes("```suggestion")) {
-                    body += `\n\n\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``;
-                }
-                else {
-                    // Replace existing suggestion
-                    body = body.replace(/```suggestion\n.*\n```/s, `\`\`\`suggestion\n${suggestedLine.trim()}\n\`\`\``);
-                }
+                return null;
+            };
+            const suggestion = extractSuggestion(body);
+            if (suggestion) {
+                body += `\n\n\`\`\`suggestion\n${suggestion.trim()}\n\`\`\``;
             }
         }
         return {
