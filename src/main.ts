@@ -124,7 +124,27 @@ async function getAIResponse(prompt: string): Promise<Array<{
   if (API_PROVIDER === "openai") {
     return getOpenAIResponse(prompt);
   } else if (API_PROVIDER === "deepseek") {
-    return getDeepseekResponse(prompt);
+    try {
+      const deepseekResponse = await getDeepseekResponse(prompt);
+      if (deepseekResponse !== null) {
+        return deepseekResponse;
+      }
+      
+      // If Deepseek API fails and OpenAI API key is available, try OpenAI as fallback
+      if (OPENAI_API_KEY) {
+        console.log("Deepseek API failed, falling back to OpenAI...");
+        return getOpenAIResponse(prompt);
+      }
+      return null;
+    } catch (error) {
+      console.error("Error with Deepseek API, checking for fallback:", error);
+      // If OpenAI API key is available, try OpenAI as fallback
+      if (OPENAI_API_KEY) {
+        console.log("Falling back to OpenAI...");
+        return getOpenAIResponse(prompt);
+      }
+      return null;
+    }
   } else {
     console.error(`Unsupported API provider: ${API_PROVIDER}`);
     return null;
@@ -182,45 +202,70 @@ async function getDeepseekResponse(prompt: string): Promise<Array<{
   }
 
   try {
+    console.log("Calling Deepseek API...");
+    
+    const requestBody = {
+      model: DEEPSEEK_API_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.2,
+      max_tokens: 700,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0
+    };
+    
+    console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
+    
     const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
       method: "POST",
       headers: {
         "Content-Type": "application/json",
         "Authorization": `Bearer ${DEEPSEEK_API_KEY}`
       },
-      body: JSON.stringify({
-        model: DEEPSEEK_API_MODEL,
-        messages: [
-          {
-            role: "system",
-            content: prompt
-          }
-        ],
-        temperature: 0.2,
-        max_tokens: 700,
-        top_p: 1,
-        frequency_penalty: 0,
-        presence_penalty: 0
-      })
+      body: JSON.stringify(requestBody)
     });
 
     if (!response.ok) {
-      throw new Error(`Deepseek API error: ${response.status} ${response.statusText}`);
+      const errorText = await response.text();
+      throw new Error(`Deepseek API error: ${response.status} ${response.statusText}\nDetails: ${errorText}`);
     }
 
     const data = await response.json();
+    console.log("Deepseek API response received");
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      console.error("Unexpected Deepseek API response format:", JSON.stringify(data));
+      return null;
+    }
+    
     const content = data.choices[0].message.content.trim() || "{}";
     
     try {
-      return JSON.parse(content).reviews;
+      const parsedContent = JSON.parse(content);
+      if (!parsedContent.reviews) {
+        console.log("Response doesn't contain reviews array:", content);
+        return [];
+      }
+      return parsedContent.reviews;
     } catch (parseError) {
       console.error("Error parsing Deepseek response as JSON:", parseError);
+      console.log("Raw response content:", content);
       
       // Attempt to extract JSON from the response if it's not properly formatted
       const jsonMatch = content.match(/\{[\s\S]*\}/);
       if (jsonMatch) {
         try {
-          return JSON.parse(jsonMatch[0]).reviews;
+          const extractedJson = JSON.parse(jsonMatch[0]);
+          if (!extractedJson.reviews) {
+            console.log("Extracted JSON doesn't contain reviews array:", jsonMatch[0]);
+            return [];
+          }
+          return extractedJson.reviews;
         } catch (e) {
           console.error("Failed to extract JSON from response:", e);
           return null;

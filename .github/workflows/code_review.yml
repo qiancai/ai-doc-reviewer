@@ -1,4 +1,5 @@
-name: Code Review with OpenAI
+name: AI Code Reviewer
+
 on:
   pull_request:
     types:
@@ -6,15 +7,18 @@ on:
       - synchronize
 permissions: write-all
 jobs:
-  code_review:
+  review:
     runs-on: ubuntu-latest
     steps:
-      - name: Checkout repository
+      - name: Checkout Repo
         uses: actions/checkout@v3
-      - name: Code Review
-        uses: freeedcom/ai-codereviewer@main
+
+      - name: AI Code Reviewer
+        uses: qiancai/ai-codereviewer@test
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "gpt-4-1106-preview"
-          exclude: "yarn.lock,dist/**"
+          API_PROVIDER: "deepseek"
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+          DEEPSEEK_API_MODEL: "deepseek-coder-33b-instruct" # Optional: defaults to "deepseek-coder-33b-instruct"
+          exclude: "**/*.json" # Optional: exclude patterns separated by commas
+
