@@ -86,13 +86,15 @@ async function analyzeCode(
 }
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
   return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comments>", "suggestedChanges": "<suggestion>"}]}
+- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comments>"}]}
 - Do not give positive comments or compliments.
 - Provide review comments and suggested changes ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the review comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
-- If you are suggesting changes, make sure to provide the exact text to replace the existing text in the following format for "suggestedChanges":
+- When suggesting changes, include a \`\`\`suggestion block in your reviewComment like this:
+
+<review comment in markdown format or the reason for the review comment>
 
 \`\`\`suggestion
 <the exact text to replace>
