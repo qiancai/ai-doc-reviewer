@@ -86,19 +86,22 @@ async function analyzeCode(
 }
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
   return `Your task is to review pull requests. Instructions:
-- Provide the response in following JSON format:  {"reviews": [{"lineNumber":  <line_number>, "reviewComment": "<review comments>"}]}
+- Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment with suggestion>"}]}
 - Do not give positive comments or compliments.
 - Provide review comments and suggested changes ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the review comment in GitHub Markdown format.
 - Use the given description only for the overall context and only comment the code.
 - IMPORTANT: NEVER suggest adding comments to the code.
-- When suggesting changes, include a \`\`\`suggestion block in your reviewComment like this:
+- CRITICAL: For EVERY review comment, you MUST include a suggestion block with the exact replacement text.
+- The suggestion block MUST be included directly in the reviewComment field.
 
-<review comment in markdown format or the reason for the review comment>
+Example of a proper review comment with suggestion:
+
+"There is a typo in the text. The word '架构' is missing a character.
 
 \`\`\`suggestion
-<the exact text to replace>
-\`\`\`
+- 作为实验性特性，TiCDC v9.0 的新架构尚未完全实现旧架构中的所有功能，这些功能将在后续的 GA 版本中完整实现，具体包括:
+\`\`\`"
 
 Review the following code diff in the file "${
     file.to
@@ -351,6 +354,18 @@ async function createReviewComment(
     comments,
     event: "COMMENT",
   });
+}
+
+// Helper function to get the line number from a change
+function getChangeLineNumber(change: any, lineNumber: number): boolean {
+  if (change.type === 'add' && change.ln === lineNumber) {
+    return true;
+  } else if (change.type === 'normal' && change.ln2 === lineNumber) {
+    return true;
+  } else if (change.type === 'del' && change.ln === lineNumber) {
+    return true;
+  }
+  return false;
 }
 
 async function main() {
