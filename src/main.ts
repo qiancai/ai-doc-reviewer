@@ -222,7 +222,7 @@ async function getDeepseekResponse(prompt: string): Promise<Array<{
           content: prompt
         }
       ],
-      temperature: 0.2,
+      temperature: 1.3,
       max_tokens: 700,
       top_p: 1,
       frequency_penalty: 0,
@@ -233,7 +233,7 @@ async function getDeepseekResponse(prompt: string): Promise<Array<{
     console.log("Request body structure:", JSON.stringify({
       model: DEEPSEEK_API_MODEL,
       messages: [{role: "user", content: "prompt content (truncated)"}],
-      temperature: 0.2,
+      temperature: 1.3,
       max_tokens: 700
     }));
     
