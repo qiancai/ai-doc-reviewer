@@ -85,7 +85,7 @@ async function analyzeCode(
   return comments;
 }
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
-  return `Your task is to review pull requests. Instructions:
+  return `As a technical writer who has profound knowledge of database and is highly skilled in making content clear, concise, and easy to understand, your task is to review pull requests. Instructions:
 - Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment with suggestion>"}]}
 - Do not give positive comments or compliments.
 - Provide review comments and suggested changes ONLY if there is something to improve, otherwise "reviews" should be an empty array.
