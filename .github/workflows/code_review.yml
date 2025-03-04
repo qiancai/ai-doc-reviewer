@@ -18,6 +18,7 @@ jobs:
 
       - name: AI Code Reviewer
         uses: qiancai/ai-codereviewer@test
+        continue-on-error: false  # Ensure workflow fails if the action fails
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           API_PROVIDER: "deepseek"  # or "openai" if you want to use OpenAI

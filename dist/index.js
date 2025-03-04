@@ -345,58 +345,76 @@ function getChangeLineNumber(change, lineNumber) {
 }
 async function main() {
     var _a;
-    // Validate API provider configuration
-    if (API_PROVIDER === "openai" && !OPENAI_API_KEY) {
-        core.setFailed("OPENAI_API_KEY is required when API_PROVIDER is set to 'openai'");
-        return;
-    }
-    if (API_PROVIDER === "deepseek" && !DEEPSEEK_API_KEY) {
-        core.setFailed("DEEPSEEK_API_KEY is required when API_PROVIDER is set to 'deepseek'");
-        return;
-    }
-    const prDetails = await getPRDetails();
-    let diff;
-    const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
-    if (eventData.action === "opened") {
-        diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
-    }
-    else if (eventData.action === "synchronize") {
-        const newBaseSha = eventData.before;
-        const newHeadSha = eventData.after;
-        const response = await octokit.repos.compareCommits({
-            headers: {
-                accept: "application/vnd.github.v3.diff",
-            },
-            owner: prDetails.owner,
-            repo: prDetails.repo,
-            base: newBaseSha,
-            head: newHeadSha,
+    try {
+        // Validate API provider configuration
+        if (API_PROVIDER === "openai" && !OPENAI_API_KEY) {
+            core.setFailed("OPENAI_API_KEY is required when API_PROVIDER is set to 'openai'");
+            return;
+        }
+        if (API_PROVIDER === "deepseek" && !DEEPSEEK_API_KEY) {
+            core.setFailed("DEEPSEEK_API_KEY is required when API_PROVIDER is set to 'deepseek'");
+            return;
+        }
+        const prDetails = await getPRDetails();
+        let diff;
+        const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
+        if (eventData.action === "opened") {
+            diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+        }
+        else if (eventData.action === "synchronize") {
+            const newBaseSha = eventData.before;
+            const newHeadSha = eventData.after;
+            const response = await octokit.repos.compareCommits({
+                headers: {
+                    accept: "application/vnd.github.v3.diff",
+                },
+                owner: prDetails.owner,
+                repo: prDetails.repo,
+                base: newBaseSha,
+                head: newHeadSha,
+            });
+            diff = String(response.data);
+        }
+        else {
+            console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
+            return;
+        }
+        if (!diff) {
+            console.log("No diff found");
+            return;
+        }
+        const parsedDiff = (0, parse_diff_1.default)(diff);
+        const excludePatterns = core
+            .getInput("exclude")
+            .split(",")
+            .map((s) => s.trim());
+        const filteredDiff = parsedDiff.filter((file) => {
+            return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
         });
-        diff = String(response.data);
+        const comments = await analyzeCode(filteredDiff, prDetails);
+        if (comments.length > 0) {
+            await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+        }
+        // Successfully completed
+        core.info("AI Code Review completed successfully");
     }
-    else {
-        console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
-        return;
-    }
-    if (!diff) {
-        console.log("No diff found");
-        return;
-    }
-    const parsedDiff = (0, parse_diff_1.default)(diff);
-    const excludePatterns = core
-        .getInput("exclude")
-        .split(",")
-        .map((s) => s.trim());
-    const filteredDiff = parsedDiff.filter((file) => {
-        return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
-    });
-    const comments = await analyzeCode(filteredDiff, prDetails);
-    if (comments.length > 0) {
-        await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+    catch (error) {
+        // Log the error details
+        if (error instanceof Error) {
+            core.setFailed(`Error in AI Code Review: ${error.message}`);
+            console.error("Error details:", error.stack);
+        }
+        else {
+            core.setFailed(`Unknown error in AI Code Review: ${error}`);
+            console.error("Unknown error:", error);
+        }
+        // Ensure the process exits with a non-zero status code
+        process.exit(1);
     }
 }
 main().catch((error) => {
     console.error("Error:", error);
+    core.setFailed(`Unhandled error in AI Code Review: ${error}`);
     process.exit(1);
 });
 
