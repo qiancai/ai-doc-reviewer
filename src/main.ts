@@ -172,7 +172,7 @@ async function getOpenAIResponse(prompt: string): Promise<Array<{
   const queryConfig = {
     model: OPENAI_API_MODEL,
     temperature: 0.2,
-    max_tokens: 700,
+    max_tokens: 1500,
     top_p: 1,
     frequency_penalty: 0,
     presence_penalty: 0,
@@ -222,8 +222,8 @@ async function getDeepseekResponse(prompt: string): Promise<Array<{
           content: prompt
         }
       ],
-      temperature: 1.3,
-      max_tokens: 700,
+      temperature: 0.2,
+      max_tokens: 1500,
       top_p: 1,
       frequency_penalty: 0,
       presence_penalty: 0
@@ -233,8 +233,8 @@ async function getDeepseekResponse(prompt: string): Promise<Array<{
     console.log("Request body structure:", JSON.stringify({
       model: DEEPSEEK_API_MODEL,
       messages: [{role: "user", content: "prompt content (truncated)"}],
-      temperature: 1.3,
-      max_tokens: 700
+      temperature: 0.2,
+      max_tokens: 1500
     }));
     
     const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
