@@ -89,7 +89,7 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
 
 IMPORTANT: You MUST follow these formatting instructions exactly:
 1. Your response MUST be a valid JSON object with the following structure:
-   {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "suggestion": "<suggested changes>"}]}
+   {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "suggestion": "<improved version of the original line>"}]}
 2. Do NOT include any markdown code blocks (like \`\`\`json) around your JSON.
 3. Ensure all JSON keys and values are properly quoted with double quotes.
 4. Escape any double quotes within string values with a backslash (\\").
@@ -104,7 +104,7 @@ Review Guidelines:
 - Review the document in the context of the overall user experience and functionality described.
 - Provide "reviews" ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the review comment in the language of the documentation.
-- For EVERY review comment of a specific line, "suggestion" MUST be the exact replacement text of that line. If the original line contains Markdown syntax such as blank spaces, hyphens "-", asterisks "*", plus "+", or ">" in the beginning of the line, keep them unchanged.
+- For EVERY review comment of a specific line, "suggestion" MUST be the improved version of the original line. If the beginning of the original line contains Markdown syntax such as blank spaces for indentation, "-", "+", "*" for unordered list, or ">" for notes, keep them unchanged.
 
 Example of a valid response:
 
@@ -271,8 +271,8 @@ async function getDeepseekResponse(prompt: string): Promise<Array<{
     return null;
   }
 
-  // Print the content
-  console.log("Deepseek API response content:", content);
+  // Print the content and add a new line
+  console.log("Deepseek API response content:", content, "\n");
   
   try {
     // First attempt: try to parse the entire content as JSON
