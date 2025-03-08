@@ -96,26 +96,30 @@ async function analyzeCode(parsedDiff, prDetails) {
 }
 function createPrompt(file, chunk, prDetails) {
     return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. Instructions:
-- Provide the response in the following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment with suggestion>"}]}
+- Provide the response in the following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment on the line>", "suggestion": "<suggested changes of the line>"}]}
 - Directly output the JSON object without any code blocks (such as \`\`\`json  or \`\`\`markdown) to wrap the JSON object.
 - Do not give positive comments or compliments.
 - Do not improve the wording of UI strings or messages returned by CLI.
+- Do not modify Markdown links such as "[\`tidb_ddl_enable_fast_reorg\`](/system-variables.md#tidb_ddl_enable_fast_reorg-从-v630-版本开始引入)".
 - Focus on improving the clarity, accuracy, and readability of the content.
 - Ensure the documentation is easy to understand for TiDB users.
 - Review not just the wording but also the logic and structure of the content.
 - Review the document in the context of the overall user experience and functionality described.
-- Provide review comments and suggested changes ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the review comment in the language of the documentation and use GitHub Markdown format.
-- CRITICAL: For EVERY review comment, YOU MUST include a suggestion block with the exact replacement text.
-- The suggestion block MUST be included directly in the reviewComment field.
+- Provide "reviews" and "suggestion" ONLY if there is something to improve, otherwise "reviews" and "suggestion" should be an empty array.
+- Write the review comment of the line in the language of the documentation and use GitHub Markdown format.
+- Write the suggested changes to the line using the exact full replacement line you suggested. This means that you need to keep the indentation and formatting of the original line unless the original indentation and formatting is incorrect.
 
-Example of a proper review comment with suggestion:
+Example of a response with a proper review comment and suggested changes:
 
-"该句中有一个 typo，“架构”这个词中少了一个“构”字。
-
-\`\`\`\`suggestion
-- 作为实验性特性，TiCDC v9.0 的新架构尚未完全实现旧架构中的所有功能，这些功能将在后续的 GA 版本中完整实现，具体包括:
-\`\`\`\`"
+\{
+  "reviews": \[
+    \{
+      "lineNumber": 42,
+      "reviewComment": "该句中有一个 typo，"集群"这个词中少了一个"群"字。",
+      "suggestion": "    2. 重启 PD 集群，使此更新生效："
+    \}
+  \]
+\}
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
 
@@ -206,110 +210,85 @@ async function getOpenAIResponse(prompt) {
     }
 }
 async function getDeepseekResponse(prompt) {
-    var _a, _b;
+    var _a, _b, _c;
     if (!DEEPSEEK_API_KEY) {
-        console.error("Deepseek API key not provided");
+        console.error("DEEPSEEK_API_KEY is not set");
+        return null;
+    }
+    console.log("Calling Deepseek API...");
+    console.log("Available Deepseek models: deepseek-chat, deepseek-coder");
+    const requestBody = {
+        model: DEEPSEEK_API_MODEL,
+        messages: [
+            {
+                role: "user",
+                content: prompt
+            }
+        ],
+        temperature: 0.2,
+        max_tokens: 800,
+        top_p: 1,
+        frequency_penalty: 0,
+        presence_penalty: 0
+    };
+    console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
+    console.log("Request body structure:", JSON.stringify({
+        model: DEEPSEEK_API_MODEL,
+        messages: [{ role: "user", content: "prompt content (truncated)" }],
+        temperature: 0.2,
+        max_tokens: 800
+    }));
+    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+        method: "POST",
+        headers: {
+            "Content-Type": "application/json",
+            "Authorization": `Bearer ${DEEPSEEK_API_KEY}`
+        },
+        body: JSON.stringify(requestBody)
+    });
+    if (!response.ok) {
+        const errorText = await response.text();
+        console.error(`Deepseek API error response: ${errorText}`);
+        throw new Error(`Deepseek API error: ${response.status} ${response.statusText}\nDetails: ${errorText}`);
+    }
+    const data = await response.json();
+    console.log("Deepseek API response received");
+    // Extract the content from the response
+    const content = (_c = (_b = (_a = data.choices) === null || _a === void 0 ? void 0 : _a[0]) === null || _b === void 0 ? void 0 : _b.message) === null || _c === void 0 ? void 0 : _c.content;
+    if (!content) {
+        console.error("No content in Deepseek response");
         return null;
     }
     try {
-        console.log("Calling Deepseek API...");
-        console.log("Available Deepseek models: deepseek-chat, deepseek-coder");
-        const requestBody = {
-            model: DEEPSEEK_API_MODEL,
-            messages: [
-                {
-                    role: "user",
-                    content: prompt
-                }
-            ],
-            temperature: 0.2,
-            max_tokens: 800,
-            top_p: 1,
-            frequency_penalty: 0,
-            presence_penalty: 0
-        };
-        console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
-        console.log("Request body structure:", JSON.stringify({
-            model: DEEPSEEK_API_MODEL,
-            messages: [{ role: "user", content: "prompt content (truncated)" }],
-            temperature: 0.2,
-            max_tokens: 800
-        }));
-        const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Authorization": `Bearer ${DEEPSEEK_API_KEY}`
-            },
-            body: JSON.stringify(requestBody)
-        });
-        if (!response.ok) {
-            const errorText = await response.text();
-            console.error(`Deepseek API error response: ${errorText}`);
-            throw new Error(`Deepseek API error: ${response.status} ${response.statusText}\nDetails: ${errorText}`);
-        }
-        const data = await response.json();
-        console.log("Deepseek API response received");
-        console.log("Response structure:", JSON.stringify({
-            id: data.id,
-            object: data.object,
-            model: data.model,
-            choices: data.choices ? [{ index: 0, message: { role: (_b = (_a = data.choices[0]) === null || _a === void 0 ? void 0 : _a.message) === null || _b === void 0 ? void 0 : _b.role } }] : null
-        }));
-        if (!data.choices || !data.choices[0] || !data.choices[0].message) {
-            console.error("Unexpected Deepseek API response format:", JSON.stringify(data));
-            return null;
-        }
-        const content = data.choices[0].message.content.trim();
-        console.log("Raw response content:", content);
-        // Extract JSON from markdown code blocks if present
-        const jsonRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/;
-        const jsonMatch = content.match(jsonRegex);
-        if (jsonMatch && jsonMatch[1]) {
-            try {
-                const parsedContent = JSON.parse(jsonMatch[1]);
-                if (!parsedContent.reviews) {
-                    console.log("Extracted JSON doesn't contain reviews array:", jsonMatch[1]);
-                    return [];
-                }
-                return parsedContent.reviews;
-            }
-            catch (parseError) {
-                console.error("Error parsing extracted JSON:", parseError);
-            }
-        }
-        // If no code block or parsing failed, try parsing the whole content
+        // First attempt: try to parse the entire content as JSON
         try {
-            const parsedContent = JSON.parse(content);
-            if (!parsedContent.reviews) {
-                console.log("Response doesn't contain reviews array:", content);
-                return [];
+            const parsedJson = JSON.parse(content);
+            if (parsedJson && parsedJson.reviews) {
+                return parsedJson.reviews;
             }
-            return parsedContent.reviews;
         }
         catch (parseError) {
             console.error("Error parsing Deepseek response as JSON:", parseError);
-            // Last resort: try to find any JSON-like structure in the content
-            const lastJsonMatch = content.match(/\{[\s\S]*?\}/);
-            if (lastJsonMatch) {
-                try {
-                    const extractedJson = JSON.parse(lastJsonMatch[0]);
-                    if (!extractedJson.reviews) {
-                        console.log("Extracted JSON doesn't contain reviews array:", lastJsonMatch[0]);
-                        return [];
-                    }
-                    return extractedJson.reviews;
-                }
-                catch (e) {
-                    console.error("Failed to extract JSON from response:", e);
+        }
+        // Second attempt: try to extract JSON from markdown code blocks
+        const jsonBlockRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/;
+        const jsonMatch = content.match(jsonBlockRegex);
+        if (jsonMatch && jsonMatch[1]) {
+            try {
+                const parsedJson = JSON.parse(jsonMatch[1]);
+                if (parsedJson && parsedJson.reviews) {
+                    return parsedJson.reviews;
                 }
             }
-            console.error("Could not extract valid JSON from response");
-            return [];
+            catch (blockParseError) {
+                console.error("Failed to parse JSON block:", blockParseError);
+            }
         }
+        console.error("Could not extract valid JSON from response");
+        return null;
     }
     catch (error) {
-        console.error("Error with Deepseek API:", error);
+        console.error("Error processing Deepseek response:", error);
         return null;
     }
 }
@@ -319,7 +298,7 @@ function createComment(file, chunk, aiResponses) {
             return [];
         }
         return {
-            body: aiResponse.reviewComment,
+            body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``,
             path: file.to,
             line: Number(aiResponse.lineNumber),
         };
