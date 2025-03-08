@@ -100,7 +100,7 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
 
 Example of a proper review comment with suggestion:
 
-"该句中有一个 typo，"架构"这个词中少了一个"构"字。
+"该句中有一个 typo，“架构”这个词中少了一个“构”字。
 
 \`\`\`\`suggestion
 - 作为实验性特性，TiCDC v9.0 的新架构尚未完全实现旧架构中的所有功能，这些功能将在后续的 GA 版本中完整实现，具体包括:
@@ -209,136 +209,117 @@ async function getDeepseekResponse(prompt: string): Promise<Array<{
   reviewComment: string;
 }> | null> {
   if (!DEEPSEEK_API_KEY) {
-    console.error("DEEPSEEK_API_KEY is not set");
+    console.error("Deepseek API key not provided");
     return null;
   }
 
-  // List available models
-  console.log("Available Deepseek models: deepseek-chat, deepseek-coder");
-
-  const requestBody = {
-    model: DEEPSEEK_API_MODEL,
-    messages: [
-      {
-        role: "user",
-        content: prompt
-      }
-    ],
-    temperature: 0.2,
-    max_tokens: 1500,
-    top_p: 1,
-    frequency_penalty: 0,
-    presence_penalty: 0
-  };
-  
-  console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
-  console.log("Request body structure:", JSON.stringify({
-    model: DEEPSEEK_API_MODEL,
-    messages: [{role: "user", content: "prompt content (truncated)"}],
-    temperature: 0.2,
-    max_tokens: 1500
-  }));
-  
-  const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Authorization": `Bearer ${DEEPSEEK_API_KEY}`
-    },
-    body: JSON.stringify(requestBody)
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text();
-    console.error(`Deepseek API error response: ${errorText}`);
-    throw new Error(`Deepseek API error: ${response.status} ${response.statusText}\nDetails: ${errorText}`);
-  }
-
-  const data = await response.json();
-  console.log("Deepseek API response received");
-  
-  // Extract the content from the response
-  const content = data.choices?.[0]?.message?.content;
-  if (!content) {
-    console.error("No content in Deepseek response");
-    return null;
-  }
-  
-  // Try to extract JSON from the response
   try {
-    // First attempt: try to parse the entire content as JSON
-    try {
-      const parsedJson = JSON.parse(content);
-      if (parsedJson && parsedJson.reviews) {
-        return parsedJson.reviews;
+    console.log("Calling Deepseek API...");
+    console.log("Available Deepseek models: deepseek-chat, deepseek-coder");
+    
+    const requestBody = {
+      model: DEEPSEEK_API_MODEL,
+      messages: [
+        {
+          role: "user",
+          content: prompt
+        }
+      ],
+      temperature: 0.2,
+      max_tokens: 800,
+      top_p: 1,
+      frequency_penalty: 0,
+      presence_penalty: 0
+    };
+    
+    console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
+    console.log("Request body structure:", JSON.stringify({
+      model: DEEPSEEK_API_MODEL,
+      messages: [{role: "user", content: "prompt content (truncated)"}],
+      temperature: 0.2,
+      max_tokens: 800
+    }));
+    
+    const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "Authorization": `Bearer ${DEEPSEEK_API_KEY}`
+      },
+      body: JSON.stringify(requestBody)
+    });
+
+    if (!response.ok) {
+      const errorText = await response.text();
+      console.error(`Deepseek API error response: ${errorText}`);
+      throw new Error(`Deepseek API error: ${response.status} ${response.statusText}\nDetails: ${errorText}`);
+    }
+
+    const data = await response.json();
+    console.log("Deepseek API response received");
+    console.log("Response structure:", JSON.stringify({
+      id: data.id,
+      object: data.object,
+      model: data.model,
+      choices: data.choices ? [{index: 0, message: {role: data.choices[0]?.message?.role}}] : null
+    }));
+    
+    if (!data.choices || !data.choices[0] || !data.choices[0].message) {
+      console.error("Unexpected Deepseek API response format:", JSON.stringify(data));
+      return null;
+    }
+    
+    const content = data.choices[0].message.content.trim();
+    console.log("Raw response content:", content);
+    
+    // Extract JSON from markdown code blocks if present
+    const jsonRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/;
+    const jsonMatch = content.match(jsonRegex);
+    
+    if (jsonMatch && jsonMatch[1]) {
+      try {
+        const parsedContent = JSON.parse(jsonMatch[1]);
+        if (!parsedContent.reviews) {
+          console.log("Extracted JSON doesn't contain reviews array:", jsonMatch[1]);
+          return [];
+        }
+        return parsedContent.reviews;
+      } catch (parseError) {
+        console.error("Error parsing extracted JSON:", parseError);
       }
+    }
+    
+    // If no code block or parsing failed, try parsing the whole content
+    try {
+      const parsedContent = JSON.parse(content);
+      if (!parsedContent.reviews) {
+        console.log("Response doesn't contain reviews array:", content);
+        return [];
+      }
+      return parsedContent.reviews;
     } catch (parseError) {
       console.error("Error parsing Deepseek response as JSON:", parseError);
-    }
-    
-    // Second attempt: try to extract JSON from markdown code blocks
-    const jsonBlockRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/g;
-    const matches = [...content.matchAll(jsonBlockRegex)];
-    
-    if (matches.length > 0) {
-      for (const match of matches) {
-        try {
-          const jsonContent = match[1].trim();
-          const parsedJson = JSON.parse(jsonContent);
-          if (parsedJson && parsedJson.reviews) {
-            return parsedJson.reviews;
-          }
-        } catch (blockParseError) {
-          console.error("Failed to parse JSON block:", blockParseError);
-        }
-      }
-    }
-    
-    // Third attempt: try to extract JSON without code block markers
-    const jsonRegex = /\{[\s\S]*"reviews"[\s\S]*\}/g;
-    const jsonMatches = content.match(jsonRegex);
-    
-    if (jsonMatches) {
-      try {
-        const parsedJson = JSON.parse(jsonMatches[0]);
-        if (parsedJson && parsedJson.reviews) {
-          return parsedJson.reviews;
-        }
-      } catch (jsonMatchError) {
-        console.error("Failed to extract JSON from response:", jsonMatchError);
-      }
-    }
-    
-    // Fourth attempt: try to manually extract review items
-    // This is a fallback for when the AI returns malformed JSON but with recognizable structure
-    const reviewItemRegex = /"lineNumber"\s*:\s*(\d+)\s*,\s*"reviewComment"\s*:\s*"([^"]*(?:\\.[^"]*)*)"/g;
-    const reviewMatches = [...content.matchAll(reviewItemRegex)];
-    
-    if (reviewMatches.length > 0) {
-      return reviewMatches.map(match => ({
-        lineNumber: match[1],
-        reviewComment: match[2].replace(/\\"/g, '"').replace(/\\n/g, '\n')
-      }));
-    }
-    
-    // If all attempts fail, try to construct a reasonable response from the content
-    if (content.includes("lineNumber") && content.includes("reviewComment")) {
-      // Try to identify line numbers and comments in the text
-      const lineNumberMatch = content.match(/lineNumber["\s:]+(\d+)/);
-      const reviewCommentMatch = content.match(/reviewComment["\s:]+(.+?)(?=\n\n|\n*$)/s);
       
-      if (lineNumberMatch && reviewCommentMatch) {
-        return [{
-          lineNumber: lineNumberMatch[1],
-          reviewComment: reviewCommentMatch[1].replace(/^["']|["']$/g, '').trim()
-        }];
+      // Last resort: try to find any JSON-like structure in the content
+      const lastJsonMatch = content.match(/\{[\s\S]*?\}/);
+      if (lastJsonMatch) {
+        try {
+          const extractedJson = JSON.parse(lastJsonMatch[0]);
+          if (!extractedJson.reviews) {
+            console.log("Extracted JSON doesn't contain reviews array:", lastJsonMatch[0]);
+            return [];
+          }
+          return extractedJson.reviews;
+        } catch (e) {
+          console.error("Failed to extract JSON from response:", e);
+        }
       }
+      
+      console.error("Could not extract valid JSON from response");
+      return [];
     }
-    
-    console.error("Could not extract valid JSON from response");
-    return null;
   } catch (error) {
-    console.error("Error processing Deepseek response:", error);
+    console.error("Error with Deepseek API:", error);
     return null;
   }
 }
