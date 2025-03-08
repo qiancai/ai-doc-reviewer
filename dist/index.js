@@ -112,14 +112,13 @@ Review Guidelines:
 - Ensure the documentation is easy to understand for TiDB users.
 - Review not just the wording but also the logic and structure of the content.
 - Review the document in the context of the overall user experience and functionality described.
-- Provide "reviewComment" and "suggestion" ONLY if there is something to improve, otherwise "reviews" and "suggestion" should be an empty array.
+- Provide "reviews" ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the review comment in the language of the documentation.
-- For EVERY review comment, "suggestion" MUST include the exact replacement line. This means that you need to keep the indentation and formatting of the original line unless the original indentation and formatting is incorrect.
-
+- For EVERY review comment of a specific line, "suggestion" MUST be the exact replacement text of that line. If the original line contains Markdown syntax such as blank spaces, hyphens "-", asterisks "*", or ">" in the beginning of the line, keep them unchanged.
 
 Example of a valid response:
 
-{"reviews": [{"lineNumber": 42, "reviewComment": "该句中有一个 typo，"架构"这个词中少了一个"构"字。", "suggestion": "作为实验性特性，TiCDC v9.0 的新架构尚未完全实现旧架构中的所有功能，这些功能将在后续的 GA 版本中完整实现，具体包括:"}]}
+{"reviews": [{"lineNumber": 42, "reviewComment": "该句描述不够清晰，建议明确说明压缩效率和压缩率的关系，并补充对默认值的解释。", "suggestion": "设置 raft-engine 在写 raft log 文件时所采用的 lz4 压缩算法的压缩效率，范围 [1, 16]。数值越低，压缩速率越高，但压缩率越低；数值越高，压缩速率越低，但压缩率越高。默认值 1 表示优先考虑压缩速率。"}]}
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
 
