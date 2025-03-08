@@ -114,7 +114,7 @@ Review Guidelines:
 - Review the document in the context of the overall user experience and functionality described.
 - Provide "reviews" ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the review comment in the language of the documentation.
-- For EVERY review comment of a specific line, "suggestion" MUST be the exact replacement text of that line. If the original line contains Markdown syntax such as blank spaces, hyphens "-", asterisks "*", or ">" in the beginning of the line, keep them unchanged.
+- For EVERY review comment of a specific line, "suggestion" MUST be the exact replacement text of that line. If the original line contains Markdown syntax such as blank spaces, hyphens "-", asterisks "*", plus "+", or ">" in the beginning of the line, keep them unchanged.
 
 Example of a valid response:
 
@@ -214,8 +214,8 @@ async function getDeepseekResponse(prompt) {
         console.error("DEEPSEEK_API_KEY is not set");
         return null;
     }
-    console.log("Calling Deepseek API...");
-    console.log("Available Deepseek models: deepseek-chat, deepseek-coder");
+    //console.log("Calling Deepseek API...");
+    //console.log("Available Deepseek models: deepseek-chat, deepseek-coder");
     const requestBody = {
         model: DEEPSEEK_API_MODEL,
         messages: [
@@ -230,13 +230,13 @@ async function getDeepseekResponse(prompt) {
         frequency_penalty: 0,
         presence_penalty: 0
     };
-    console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
-    console.log("Request body structure:", JSON.stringify({
-        model: DEEPSEEK_API_MODEL,
-        messages: [{ role: "user", content: "prompt content (truncated)" }],
-        temperature: 0.2,
-        max_tokens: 800
-    }));
+    //console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
+    //console.log("Request body structure:", JSON.stringify({
+    //  model: DEEPSEEK_API_MODEL,
+    //  messages: [{role: "user", content: "prompt content (truncated)"}],
+    //  temperature: 0.2,
+    //  max_tokens: 800
+    //}));
     const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
         method: "POST",
         headers: {
@@ -258,6 +258,8 @@ async function getDeepseekResponse(prompt) {
         console.error("No content in Deepseek response");
         return null;
     }
+    // Print the content
+    console.log("Deepseek API response content:", content);
     try {
         // First attempt: try to parse the entire content as JSON
         try {
