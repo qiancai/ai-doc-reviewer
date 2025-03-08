@@ -98,8 +98,9 @@ function createPrompt(file, chunk, prDetails) {
     return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. Instructions:
 - Provide the response in the following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment with suggestion>"}]}
 - Do not give positive comments or compliments.
+- Do not improve the wording of UI strings or messages returned by CLI.
 - Focus on improving the clarity, accuracy, and readability of the content.
-- Ensure the documentation is easy to understand for the target audience (product users).
+- Ensure the documentation is easy to understand for TiDB users.
 - Review not just the wording but also the logic and structure of the content.
 - Review the document in the context of the overall user experience and functionality described.
 - Provide review comments and suggested changes ONLY if there is something to improve, otherwise "reviews" should be an empty array.
@@ -109,7 +110,7 @@ function createPrompt(file, chunk, prDetails) {
 
 Example of a proper review comment with suggestion:
 
-"There is a typo in the text. The word '架构' is missing a character.
+"该句中有一个 typo，“架构”这个词中少了一个“构”字。
 
 \`\`\`\`suggestion
 - 作为实验性特性，TiCDC v9.0 的新架构尚未完全实现旧架构中的所有功能，这些功能将在后续的 GA 版本中完整实现，具体包括:
@@ -175,7 +176,7 @@ async function getOpenAIResponse(prompt) {
     }
     const queryConfig = {
         model: OPENAI_API_MODEL,
-        temperature: 0.2,
+        temperature: 0.3,
         max_tokens: 800,
         top_p: 1,
         frequency_penalty: 0,
@@ -220,7 +221,7 @@ async function getDeepseekResponse(prompt) {
                     content: prompt
                 }
             ],
-            temperature: 0.2,
+            temperature: 0.3,
             max_tokens: 800,
             top_p: 1,
             frequency_penalty: 0,
@@ -230,7 +231,7 @@ async function getDeepseekResponse(prompt) {
         console.log("Request body structure:", JSON.stringify({
             model: DEEPSEEK_API_MODEL,
             messages: [{ role: "user", content: "prompt content (truncated)" }],
-            temperature: 0.2,
+            temperature: 0.3,
             max_tokens: 800
         }));
         const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
