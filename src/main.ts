@@ -87,6 +87,7 @@ async function analyzeCode(
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
   return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. Instructions:
 - Provide the response in the following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment with suggestion>"}]}
+- Directly output the JSON object without any code blocks (such as \`\`\`json  or \`\`\`markdown) to wrap the JSON object.
 - Do not give positive comments or compliments.
 - Do not improve the wording of UI strings or messages returned by CLI.
 - Focus on improving the clarity, accuracy, and readability of the content.
