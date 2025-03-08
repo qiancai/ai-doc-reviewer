@@ -104,7 +104,7 @@ function createPrompt(file, chunk, prDetails) {
 - Review not just the wording but also the logic and structure of the content.
 - Review the document in the context of the overall user experience and functionality described.
 - Provide review comments and suggested changes ONLY if there is something to improve, otherwise "reviews" should be an empty array.
-- Write the review comment in GitHub Markdown format.
+- Write the review comment in the language of the documentation and use GitHub Markdown format.
 - CRITICAL: For EVERY review comment, YOU MUST include a suggestion block with the exact replacement text.
 - The suggestion block MUST be included directly in the reviewComment field.
 
@@ -176,7 +176,7 @@ async function getOpenAIResponse(prompt) {
     }
     const queryConfig = {
         model: OPENAI_API_MODEL,
-        temperature: 0.3,
+        temperature: 0.2,
         max_tokens: 800,
         top_p: 1,
         frequency_penalty: 0,
@@ -221,7 +221,7 @@ async function getDeepseekResponse(prompt) {
                     content: prompt
                 }
             ],
-            temperature: 0.3,
+            temperature: 0.2,
             max_tokens: 800,
             top_p: 1,
             frequency_penalty: 0,
@@ -231,7 +231,7 @@ async function getDeepseekResponse(prompt) {
         console.log("Request body structure:", JSON.stringify({
             model: DEEPSEEK_API_MODEL,
             messages: [{ role: "user", content: "prompt content (truncated)" }],
-            temperature: 0.3,
+            temperature: 0.2,
             max_tokens: 800
         }));
         const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
