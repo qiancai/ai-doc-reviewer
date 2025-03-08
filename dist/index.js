@@ -95,31 +95,31 @@ async function analyzeCode(parsedDiff, prDetails) {
     return comments;
 }
 function createPrompt(file, chunk, prDetails) {
-    return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. Instructions:
-- Provide the response in the following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment on the line>", "suggestion": "<suggested changes of the line>"}]}
-- Directly output the JSON object without any code blocks (such as \`\`\`json  or \`\`\`markdown) to wrap the JSON object.
+    return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. 
+
+IMPORTANT: You MUST follow these formatting instructions exactly:
+1. Your response MUST be a valid JSON object with the following structure:
+   {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment>", "suggestion": "<suggested changes>"}]}
+2. Do NOT include any markdown code blocks (like \`\`\`json) around your JSON.
+3. Ensure all JSON keys and values are properly quoted with double quotes.
+4. Escape any double quotes within string values with a backslash (\\").
+5. Do NOT include any explanations or text outside of the JSON object.
+
+Review Guidelines:
 - Do not give positive comments or compliments.
 - Do not improve the wording of UI strings or messages returned by CLI.
-- Do not modify Markdown links such as "[\`tidb_ddl_enable_fast_reorg\`](/system-variables.md#tidb_ddl_enable_fast_reorg-从-v630-版本开始引入)".
 - Focus on improving the clarity, accuracy, and readability of the content.
 - Ensure the documentation is easy to understand for TiDB users.
 - Review not just the wording but also the logic and structure of the content.
 - Review the document in the context of the overall user experience and functionality described.
-- Provide "reviews" and "suggestion" ONLY if there is something to improve, otherwise "reviews" and "suggestion" should be an empty array.
-- Write the review comment of the line in the language of the documentation and use GitHub Markdown format.
-- Write the suggested changes to the line using the exact full replacement line you suggested. This means that you need to keep the indentation and formatting of the original line unless the original indentation and formatting is incorrect.
+- Provide "reviewComment" and "suggestion" ONLY if there is something to improve, otherwise "reviews" and "suggestion" should be an empty array.
+- Write the review comment in the language of the documentation.
+- For EVERY review comment, "suggestion" MUST include the exact replacement line. This means that you need to keep the indentation and formatting of the original line unless the original indentation and formatting is incorrect.
 
-Example of a response with a proper review comment and suggested changes:
 
-\{
-  "reviews": \[
-    \{
-      "lineNumber": 42,
-      "reviewComment": "该句中有一个 typo，"集群"这个词中少了一个"群"字。",
-      "suggestion": "    2. 重启 PD 集群，使此更新生效："
-    \}
-  \]
-\}
+Example of a valid response:
+
+{"reviews": [{"lineNumber": 42, "reviewComment": "该句中有一个 typo，"架构"这个词中少了一个"构"字。", "suggestion": "作为实验性特性，TiCDC v9.0 的新架构尚未完全实现旧架构中的所有功能，这些功能将在后续的 GA 版本中完整实现，具体包括:"}]}
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
 
