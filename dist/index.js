@@ -95,23 +95,25 @@ async function analyzeCode(parsedDiff, prDetails) {
     return comments;
 }
 function createPrompt(file, chunk, prDetails) {
-    return `As a technical writer who has profound knowledge of database and is highly skilled in making content clear, concise, and easy to understand, your task is to review pull requests. Instructions:
-- Provide the response in following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment with suggestion>"}]}
+    return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. Instructions:
+- Provide the response in the following JSON format: {"reviews": [{"lineNumber": <line_number>, "reviewComment": "<review comment with suggestion>"}]}
 - Do not give positive comments or compliments.
+- Focus on improving the clarity, accuracy, and readability of the content.
+- Ensure the documentation is easy to understand for the target audience (product users).
+- Review not just the wording but also the logic and structure of the content.
+- Review the document in the context of the overall user experience and functionality described.
 - Provide review comments and suggested changes ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the review comment in GitHub Markdown format.
-- Use the given description only for the overall context and only comment the code.
-- IMPORTANT: NEVER suggest adding comments to the code.
-- CRITICAL: For EVERY review comment, you MUST include a suggestion block with the exact replacement text.
+- CRITICAL: For EVERY review comment, YOU MUST include a suggestion block with the exact replacement text.
 - The suggestion block MUST be included directly in the reviewComment field.
 
 Example of a proper review comment with suggestion:
 
 "There is a typo in the text. The word '架构' is missing a character.
 
-\`\`\`suggestion
+\`\`\`\`suggestion
 - 作为实验性特性，TiCDC v9.0 的新架构尚未完全实现旧架构中的所有功能，这些功能将在后续的 GA 版本中完整实现，具体包括:
-\`\`\`"
+\`\`\`\`"
 
 Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
 
