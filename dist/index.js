@@ -45,26 +45,53 @@ const OPENAI_API_KEY = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL = core.getInput("OPENAI_API_MODEL");
 const DEEPSEEK_API_KEY = core.getInput("DEEPSEEK_API_KEY");
 const DEEPSEEK_API_MODEL = core.getInput("DEEPSEEK_API_MODEL") || "deepseek-chat";
+const REVIEW_MODE = core.getInput("REVIEW_MODE") || "default";
+const COMMIT_SHA = core.getInput("COMMIT_SHA") || "";
+const BASE_SHA = core.getInput("BASE_SHA") || "";
+const HEAD_SHA = core.getInput("HEAD_SHA") || "";
+const ALLOWED_USERS = core.getInput("ALLOWED_USERS").split(",").map(u => u.trim());
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
 // Initialize OpenAI client if using OpenAI
 const openai = API_PROVIDER === "openai"
     ? new openai_1.default({ apiKey: OPENAI_API_KEY })
     : null;
 async function getPRDetails() {
-    var _a, _b;
-    const { repository, number } = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH || "", "utf8"));
-    const prResponse = await octokit.pulls.get({
-        owner: repository.owner.login,
-        repo: repository.name,
-        pull_number: number,
-    });
-    return {
-        owner: repository.owner.login,
-        repo: repository.name,
-        pull_number: number,
-        title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
-        description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
-    };
+    var _a, _b, _c, _d;
+    const eventPath = process.env.GITHUB_EVENT_PATH || "";
+    const eventData = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
+    // Handle different event types
+    if (process.env.GITHUB_EVENT_NAME === "issue_comment") {
+        // For comment triggers, we need to get the PR details from the issue
+        const issueNumber = eventData.issue.number;
+        const prResponse = await octokit.pulls.get({
+            owner: eventData.repository.owner.login,
+            repo: eventData.repository.name,
+            pull_number: issueNumber,
+        });
+        return {
+            owner: eventData.repository.owner.login,
+            repo: eventData.repository.name,
+            pull_number: issueNumber,
+            title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
+            description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
+        };
+    }
+    else {
+        // For PR triggers, use the standard approach
+        const { repository, number } = eventData;
+        const prResponse = await octokit.pulls.get({
+            owner: repository.owner.login,
+            repo: repository.name,
+            pull_number: number,
+        });
+        return {
+            owner: repository.owner.login,
+            repo: repository.name,
+            pull_number: number,
+            title: (_c = prResponse.data.title) !== null && _c !== void 0 ? _c : "",
+            description: (_d = prResponse.data.body) !== null && _d !== void 0 ? _d : "",
+        };
+    }
 }
 async function getDiff(owner, repo, pull_number) {
     const response = await octokit.pulls.get({
@@ -342,7 +369,48 @@ async function main() {
         const prDetails = await getPRDetails();
         let diff;
         const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
-        if (eventData.action === "opened") {
+        // Check if triggered by a comment
+        const isCommentTrigger = process.env.GITHUB_EVENT_NAME === "issue_comment";
+        if (isCommentTrigger) {
+            // Verify if the comment user is allowed to trigger reviews
+            const commentUser = eventData.comment.user.login;
+            if (ALLOWED_USERS.length > 0 && !ALLOWED_USERS.includes(commentUser)) {
+                console.log(`User ${commentUser} is not allowed to trigger reviews. Allowed users: ${ALLOWED_USERS.join(", ")}`);
+                return;
+            }
+            // Get diff based on comment content
+            if (REVIEW_MODE === "single_commit" && COMMIT_SHA) {
+                // Get diff for a single commit
+                console.log(`Reviewing single commit: ${COMMIT_SHA}`);
+                const response = await octokit.repos.getCommit({
+                    owner: prDetails.owner,
+                    repo: prDetails.repo,
+                    ref: COMMIT_SHA,
+                    mediaType: { format: "diff" }
+                });
+                // @ts-expect-error - response.data is a string
+                diff = response.data;
+            }
+            else if (REVIEW_MODE === "commit_range" && BASE_SHA && HEAD_SHA) {
+                // Get diff for a range of commits
+                console.log(`Reviewing commit range: ${BASE_SHA}..${HEAD_SHA}`);
+                const response = await octokit.repos.compareCommits({
+                    owner: prDetails.owner,
+                    repo: prDetails.repo,
+                    base: BASE_SHA,
+                    head: HEAD_SHA,
+                    mediaType: { format: "diff" }
+                });
+                // @ts-expect-error - response.data is a string
+                diff = response.data;
+            }
+            else {
+                // Default: get latest PR diff
+                console.log("Reviewing latest PR changes");
+                diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+            }
+        }
+        else if (eventData.action === "opened") {
             diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
         }
         else if (eventData.action === "synchronize") {
@@ -375,12 +443,65 @@ async function main() {
         const filteredDiff = parsedDiff.filter((file) => {
             return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
         });
-        const comments = await analyzeCode(filteredDiff, prDetails);
-        if (comments.length > 0) {
-            await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+        // Track if we had critical errors that should fail the action
+        let hadCriticalErrors = false;
+        try {
+            const comments = await analyzeCode(filteredDiff, prDetails);
+            if (comments.length > 0) {
+                await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+                // If triggered by a comment, reply with a completion message
+                if (isCommentTrigger) {
+                    await octokit.issues.createComment({
+                        owner: prDetails.owner,
+                        repo: prDetails.repo,
+                        issue_number: prDetails.pull_number,
+                        body: `✅ Code review completed, generated ${comments.length} comments.`
+                    });
+                }
+            }
+            else {
+                // If triggered by a comment but no comments were generated, also reply
+                if (isCommentTrigger) {
+                    await octokit.issues.createComment({
+                        owner: prDetails.owner,
+                        repo: prDetails.repo,
+                        issue_number: prDetails.pull_number,
+                        body: `✅ Code review completed, no issues found.`
+                    });
+                }
+            }
         }
-        // Successfully completed
-        core.info("AI Code Review completed successfully");
+        catch (analyzeError) {
+            hadCriticalErrors = true;
+            if (analyzeError instanceof Error) {
+                core.setFailed(`Critical error during code analysis: ${analyzeError.message}`);
+                // If triggered by a comment, reply with the error message
+                if (isCommentTrigger) {
+                    await octokit.issues.createComment({
+                        owner: prDetails.owner,
+                        repo: prDetails.repo,
+                        issue_number: prDetails.pull_number,
+                        body: `❌ Code review failed: ${analyzeError.message}`
+                    });
+                }
+            }
+            else {
+                core.setFailed(`Unknown critical error during code analysis: ${analyzeError}`);
+                // If triggered by a comment, reply with the error message
+                if (isCommentTrigger) {
+                    await octokit.issues.createComment({
+                        owner: prDetails.owner,
+                        repo: prDetails.repo,
+                        issue_number: prDetails.pull_number,
+                        body: `❌ Code review failed: Unknown error`
+                    });
+                }
+            }
+        }
+        // Only report success if we didn't have critical errors
+        if (!hadCriticalErrors) {
+            core.info("AI Code Review completed successfully");
+        }
     }
     catch (error) {
         // Log the error details

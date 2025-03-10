@@ -11,6 +11,11 @@ const OPENAI_API_KEY: string = core.getInput("OPENAI_API_KEY");
 const OPENAI_API_MODEL: string = core.getInput("OPENAI_API_MODEL");
 const DEEPSEEK_API_KEY: string = core.getInput("DEEPSEEK_API_KEY");
 const DEEPSEEK_API_MODEL: string = core.getInput("DEEPSEEK_API_MODEL") || "deepseek-chat";
+const REVIEW_MODE: string = core.getInput("REVIEW_MODE") || "default";
+const COMMIT_SHA: string = core.getInput("COMMIT_SHA") || "";
+const BASE_SHA: string = core.getInput("BASE_SHA") || "";
+const HEAD_SHA: string = core.getInput("HEAD_SHA") || "";
+const ALLOWED_USERS: string[] = core.getInput("ALLOWED_USERS").split(",").map(u => u.trim());
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -374,7 +379,52 @@ async function main() {
     const eventData = JSON.parse(
       readFileSync(process.env.GITHUB_EVENT_PATH ?? "", "utf8")
     );
-    if (eventData.action === "opened") {
+    
+    // Check if the comment is triggered
+    const isCommentTrigger = process.env.GITHUB_EVENT_NAME === "issue_comment";
+    
+    if (isCommentTrigger) {
+      // Check if the comment user has permission to trigger reviews
+      const commentUser = eventData.comment.user.login;
+      if (ALLOWED_USERS.length > 0 && !ALLOWED_USERS.includes(commentUser)) {
+        console.log(`User ${commentUser} is not allowed to trigger reviews. Allowed users: ${ALLOWED_USERS.join(", ")}`);
+        return;
+      }
+      
+      // Get diff based on the comment content
+      if (REVIEW_MODE === "single_commit" && COMMIT_SHA) {
+        // Get the diff of a single commit
+        console.log(`Reviewing single commit: ${COMMIT_SHA}`);
+        const response = await octokit.repos.getCommit({
+          owner: prDetails.owner,
+          repo: prDetails.repo,
+          ref: COMMIT_SHA,
+          mediaType: { format: "diff" }
+        });
+        // @ts-expect-error - response.data is a string
+        diff = response.data;
+      } else if (REVIEW_MODE === "commit_range") {
+        const [baseSha, headSha] = BASE_SHA.split('..'); // split the commit range
+        console.log(`Reviewing commit range: ${baseSha} to ${headSha}`);
+        
+        const response = await octokit.repos.compareCommits({
+          owner: prDetails.owner,
+          repo: prDetails.repo,
+          base: baseSha,
+          head: headSha,
+          mediaType: { format: "diff" }
+        });
+        diff = response.data;
+      } else {
+        // Get the diff of the latest PR changes
+        console.log("Reviewing latest PR changes");
+        diff = await getDiff(
+          prDetails.owner,
+          prDetails.repo,
+          prDetails.pull_number
+        );
+      }
+    } else if (eventData.action === "opened") {
       diff = await getDiff(
         prDetails.owner,
         prDetails.repo,
@@ -416,19 +466,73 @@ async function main() {
       );
     });
 
-    const comments = await analyzeCode(filteredDiff, prDetails);
+    // Track if we had critical errors that should fail the action
+    let hadCriticalErrors = false;
+    
+    try {
+      const comments = await analyzeCode(filteredDiff, prDetails);
 
-    if (comments.length > 0) {
-      await createReviewComment(
-        prDetails.owner,
-        prDetails.repo,
-        prDetails.pull_number,
-        comments
-      );
+      if (comments.length > 0) {
+        await createReviewComment(
+          prDetails.owner,
+          prDetails.repo,
+          prDetails.pull_number,
+          comments
+        );
+        
+        // If the comment is triggered, reply a comment to indicate the completion
+        if (isCommentTrigger) {
+          await octokit.issues.createComment({
+            owner: prDetails.owner,
+            repo: prDetails.repo,
+            issue_number: prDetails.pull_number,
+            body: `✅ Code review completed, ${comments.length} comments generated.`
+          });
+        }
+      } else {
+        // If the comment is triggered but no comments are generated, also reply a message
+        if (isCommentTrigger) {
+          await octokit.issues.createComment({
+            owner: prDetails.owner,
+            repo: prDetails.repo,
+            issue_number: prDetails.pull_number,
+            body: `✅ Code review completed, no issues found.`
+          });
+        }
+      }
+    } catch (analyzeError) {
+      hadCriticalErrors = true;
+      if (analyzeError instanceof Error) {
+        core.setFailed(`Critical error during code analysis: ${analyzeError.message}`);
+        
+        // If the comment is triggered, reply the error information
+        if (isCommentTrigger) {
+          await octokit.issues.createComment({
+            owner: prDetails.owner,
+            repo: prDetails.repo,
+            issue_number: prDetails.pull_number,
+            body: `❌ Code review failed: ${analyzeError.message}`
+          });
+        }
+      } else {
+        core.setFailed(`Unknown critical error during code analysis: ${analyzeError}`);
+        
+        // If the comment is triggered, reply the error information
+        if (isCommentTrigger) {
+          await octokit.issues.createComment({
+            owner: prDetails.owner,
+            repo: prDetails.repo,
+            issue_number: prDetails.pull_number,
+            body: `❌ Code review failed: Unknown error`
+          });
+        }
+      }
     }
     
-    // Successfully completed
-    core.info("AI Code Review completed successfully");
+    // Only report success if we didn't have critical errors
+    if (!hadCriticalErrors) {
+      core.info("AI Code Review completed successfully");
+    }
     
   } catch (error) {
     // Log the error details
