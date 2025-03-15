@@ -47,6 +47,7 @@ async function getPRDetails(): Promise<PRDetails> {
     console.log("Event type:", process.env.GITHUB_EVENT_NAME);
     
     if (process.env.GITHUB_EVENT_NAME === "issue_comment") {
+      if (!eventData.issue || !eventData.issue.pull_request) {
         throw new Error("Comment is not on a pull request");
       }
       
@@ -57,6 +58,7 @@ async function getPRDetails(): Promise<PRDetails> {
       const number = parseInt(urlParts[urlParts.length - 1], 10);
       const repo = urlParts[urlParts.length - 3];
       const owner = urlParts[urlParts.length - 4];
+      
       console.log(`Extracted PR info - owner: ${owner}, repo: ${repo}, number: ${number}`);
       
       const prResponse = await octokit.pulls.get({
@@ -78,6 +80,7 @@ async function getPRDetails(): Promise<PRDetails> {
       console.log("Event data:", JSON.stringify(eventData, null, 2));
       throw new Error("Invalid event data: missing repository information");
     }
+    
     const repository = eventData.repository;
     const number = eventData.number || eventData.pull_request?.number;
     
