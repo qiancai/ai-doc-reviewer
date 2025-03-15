@@ -403,18 +403,40 @@ async function main() {
         });
         // @ts-expect-error - response.data is a string
         diff = response.data;
-      } else if (REVIEW_MODE === "commit_range") {
-        const [baseSha, headSha] = BASE_SHA.split('..'); // split the commit range
+      } else if (REVIEW_MODE === "commit_range" && BASE_SHA) {
+        //split the commit range
+        const parts = BASE_SHA.split('..');
+        const baseSha = parts[0];
+        const headSha = parts.length > 1 ? parts[1] : HEAD_SHA;
+        
+        if (!baseSha || !headSha) {
+          throw new Error(`Invalid commit range: ${BASE_SHA}..${HEAD_SHA}`);
+        }
+        
         console.log(`Reviewing commit range: ${baseSha} to ${headSha}`);
         
-        const response = await octokit.repos.compareCommits({
-          owner: prDetails.owner,
-          repo: prDetails.repo,
-          base: baseSha,
-          head: headSha,
-          mediaType: { format: "diff" }
-        });
-        diff = response.data;
+        try {
+          const response = await octokit.repos.compareCommits({
+            owner: prDetails.owner,
+            repo: prDetails.repo,
+            base: baseSha,
+            head: headSha,
+            headers: {
+              accept: "application/vnd.github.v3.diff",
+            }
+          });
+          
+          if (!response.data) {
+            throw new Error("Empty response from GitHub API");
+          }
+          
+          diff = typeof response.data === 'string' ? response.data : String(response.data);
+          console.log("Diff length:", diff.length);
+          console.log("Diff preview (first 200 chars):", diff.substring(0, 200));
+        } catch (apiError) {
+          console.error("Error calling GitHub API:", apiError);
+          throw new Error(`Failed to get diff from GitHub API: ${apiError instanceof Error ? apiError.message : String(apiError)}`);
+        }
       } else {
         // Get the diff of the latest PR changes
         console.log("Reviewing latest PR changes");
@@ -448,12 +470,17 @@ async function main() {
       return;
     }
 
-    if (!diff) {
-      console.log("No diff found");
-      return;
+    if (!diff || typeof diff !== 'string' || diff.trim() === '') {
+      console.error("Empty or invalid diff returned from GitHub API");
+      throw new Error("Failed to retrieve diff from GitHub API");
     }
 
     const parsedDiff = parseDiff(diff);
+
+    if (!parsedDiff || parsedDiff.length === 0) {
+      console.error("Failed to parse diff:", diff);
+      throw new Error("Failed to parse diff from GitHub API");
+    }
 
     const excludePatterns = core
       .getInput("exclude")
@@ -465,6 +492,19 @@ async function main() {
         minimatch(file.to ?? "", pattern)
       );
     });
+
+    if (filteredDiff.length === 0) {
+      console.log("No files to review after filtering");
+      if (isCommentTrigger) {
+        await octokit.issues.createComment({
+          owner: prDetails.owner,
+          repo: prDetails.repo,
+          issue_number: prDetails.pull_number,
+          body: `✅ Code review completed, no files to review after filtering.`
+        });
+      }
+      return;
+    }
 
     // Track if we had critical errors that should fail the action
     let hadCriticalErrors = false;

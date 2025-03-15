@@ -56,42 +56,20 @@ const openai = API_PROVIDER === "openai"
     ? new openai_1.default({ apiKey: OPENAI_API_KEY })
     : null;
 async function getPRDetails() {
-    var _a, _b, _c, _d;
-    const eventPath = process.env.GITHUB_EVENT_PATH || "";
-    const eventData = JSON.parse((0, fs_1.readFileSync)(eventPath, "utf8"));
-    // Handle different event types
-    if (process.env.GITHUB_EVENT_NAME === "issue_comment") {
-        // For comment triggers, we need to get the PR details from the issue
-        const issueNumber = eventData.issue.number;
-        const prResponse = await octokit.pulls.get({
-            owner: eventData.repository.owner.login,
-            repo: eventData.repository.name,
-            pull_number: issueNumber,
-        });
-        return {
-            owner: eventData.repository.owner.login,
-            repo: eventData.repository.name,
-            pull_number: issueNumber,
-            title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
-            description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
-        };
-    }
-    else {
-        // For PR triggers, use the standard approach
-        const { repository, number } = eventData;
-        const prResponse = await octokit.pulls.get({
-            owner: repository.owner.login,
-            repo: repository.name,
-            pull_number: number,
-        });
-        return {
-            owner: repository.owner.login,
-            repo: repository.name,
-            pull_number: number,
-            title: (_c = prResponse.data.title) !== null && _c !== void 0 ? _c : "",
-            description: (_d = prResponse.data.body) !== null && _d !== void 0 ? _d : "",
-        };
-    }
+    var _a, _b;
+    const { repository, number } = JSON.parse((0, fs_1.readFileSync)(process.env.GITHUB_EVENT_PATH || "", "utf8"));
+    const prResponse = await octokit.pulls.get({
+        owner: repository.owner.login,
+        repo: repository.name,
+        pull_number: number,
+    });
+    return {
+        owner: repository.owner.login,
+        repo: repository.name,
+        pull_number: number,
+        title: (_a = prResponse.data.title) !== null && _a !== void 0 ? _a : "",
+        description: (_b = prResponse.data.body) !== null && _b !== void 0 ? _b : "",
+    };
 }
 async function getDiff(owner, repo, pull_number) {
     const response = await octokit.pulls.get({
@@ -369,18 +347,18 @@ async function main() {
         const prDetails = await getPRDetails();
         let diff;
         const eventData = JSON.parse((0, fs_1.readFileSync)((_a = process.env.GITHUB_EVENT_PATH) !== null && _a !== void 0 ? _a : "", "utf8"));
-        // Check if triggered by a comment
+        // Check if the comment is triggered
         const isCommentTrigger = process.env.GITHUB_EVENT_NAME === "issue_comment";
         if (isCommentTrigger) {
-            // Verify if the comment user is allowed to trigger reviews
+            // Check if the comment user has permission to trigger reviews
             const commentUser = eventData.comment.user.login;
             if (ALLOWED_USERS.length > 0 && !ALLOWED_USERS.includes(commentUser)) {
                 console.log(`User ${commentUser} is not allowed to trigger reviews. Allowed users: ${ALLOWED_USERS.join(", ")}`);
                 return;
             }
-            // Get diff based on comment content
+            // Get diff based on the comment content
             if (REVIEW_MODE === "single_commit" && COMMIT_SHA) {
-                // Get diff for a single commit
+                // Get the diff of a single commit
                 console.log(`Reviewing single commit: ${COMMIT_SHA}`);
                 const response = await octokit.repos.getCommit({
                     owner: prDetails.owner,
@@ -391,21 +369,39 @@ async function main() {
                 // @ts-expect-error - response.data is a string
                 diff = response.data;
             }
-            else if (REVIEW_MODE === "commit_range" && BASE_SHA && HEAD_SHA) {
-                // Get diff for a range of commits
-                console.log(`Reviewing commit range: ${BASE_SHA}..${HEAD_SHA}`);
-                const response = await octokit.repos.compareCommits({
-                    owner: prDetails.owner,
-                    repo: prDetails.repo,
-                    base: BASE_SHA,
-                    head: HEAD_SHA,
-                    mediaType: { format: "diff" }
-                });
-                // @ts-expect-error - response.data is a string
-                diff = response.data;
+            else if (REVIEW_MODE === "commit_range" && BASE_SHA) {
+                //split the commit range
+                const parts = BASE_SHA.split('..');
+                const baseSha = parts[0];
+                const headSha = parts.length > 1 ? parts[1] : HEAD_SHA;
+                if (!baseSha || !headSha) {
+                    throw new Error(`Invalid commit range: ${BASE_SHA}..${HEAD_SHA}`);
+                }
+                console.log(`Reviewing commit range: ${baseSha} to ${headSha}`);
+                try {
+                    const response = await octokit.repos.compareCommits({
+                        owner: prDetails.owner,
+                        repo: prDetails.repo,
+                        base: baseSha,
+                        head: headSha,
+                        headers: {
+                            accept: "application/vnd.github.v3.diff",
+                        }
+                    });
+                    if (!response.data) {
+                        throw new Error("Empty response from GitHub API");
+                    }
+                    diff = typeof response.data === 'string' ? response.data : String(response.data);
+                    console.log("Diff length:", diff.length);
+                    console.log("Diff preview (first 200 chars):", diff.substring(0, 200));
+                }
+                catch (apiError) {
+                    console.error("Error calling GitHub API:", apiError);
+                    throw new Error(`Failed to get diff from GitHub API: ${apiError instanceof Error ? apiError.message : String(apiError)}`);
+                }
             }
             else {
-                // Default: get latest PR diff
+                // Get the diff of the latest PR changes
                 console.log("Reviewing latest PR changes");
                 diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
             }
@@ -431,11 +427,15 @@ async function main() {
             console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
             return;
         }
-        if (!diff) {
-            console.log("No diff found");
-            return;
+        if (!diff || typeof diff !== 'string' || diff.trim() === '') {
+            console.error("Empty or invalid diff returned from GitHub API");
+            throw new Error("Failed to retrieve diff from GitHub API");
         }
         const parsedDiff = (0, parse_diff_1.default)(diff);
+        if (!parsedDiff || parsedDiff.length === 0) {
+            console.error("Failed to parse diff:", diff);
+            throw new Error("Failed to parse diff from GitHub API");
+        }
         const excludePatterns = core
             .getInput("exclude")
             .split(",")
@@ -443,24 +443,36 @@ async function main() {
         const filteredDiff = parsedDiff.filter((file) => {
             return !excludePatterns.some((pattern) => { var _a; return (0, minimatch_1.default)((_a = file.to) !== null && _a !== void 0 ? _a : "", pattern); });
         });
+        if (filteredDiff.length === 0) {
+            console.log("No files to review after filtering");
+            if (isCommentTrigger) {
+                await octokit.issues.createComment({
+                    owner: prDetails.owner,
+                    repo: prDetails.repo,
+                    issue_number: prDetails.pull_number,
+                    body: `✅ Code review completed, no files to review after filtering.`
+                });
+            }
+            return;
+        }
         // Track if we had critical errors that should fail the action
         let hadCriticalErrors = false;
         try {
             const comments = await analyzeCode(filteredDiff, prDetails);
             if (comments.length > 0) {
                 await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-                // If triggered by a comment, reply with a completion message
+                // If the comment is triggered, reply a comment to indicate the completion
                 if (isCommentTrigger) {
                     await octokit.issues.createComment({
                         owner: prDetails.owner,
                         repo: prDetails.repo,
                         issue_number: prDetails.pull_number,
-                        body: `✅ Code review completed, generated ${comments.length} comments.`
+                        body: `✅ Code review completed, ${comments.length} comments generated.`
                     });
                 }
             }
             else {
-                // If triggered by a comment but no comments were generated, also reply
+                // If the comment is triggered but no comments are generated, also reply a message
                 if (isCommentTrigger) {
                     await octokit.issues.createComment({
                         owner: prDetails.owner,
@@ -475,7 +487,7 @@ async function main() {
             hadCriticalErrors = true;
             if (analyzeError instanceof Error) {
                 core.setFailed(`Critical error during code analysis: ${analyzeError.message}`);
-                // If triggered by a comment, reply with the error message
+                // If the comment is triggered, reply the error information
                 if (isCommentTrigger) {
                     await octokit.issues.createComment({
                         owner: prDetails.owner,
@@ -487,7 +499,7 @@ async function main() {
             }
             else {
                 core.setFailed(`Unknown critical error during code analysis: ${analyzeError}`);
-                // If triggered by a comment, reply with the error message
+                // If the comment is triggered, reply the error information
                 if (isCommentTrigger) {
                     await octokit.issues.createComment({
                         owner: prDetails.owner,
