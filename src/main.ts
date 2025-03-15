@@ -36,21 +36,78 @@ interface PRDetails {
 }
 
 async function getPRDetails(): Promise<PRDetails> {
-  const { repository, number } = JSON.parse(
-    readFileSync(process.env.GITHUB_EVENT_PATH || "", "utf8")
-  );
-  const prResponse = await octokit.pulls.get({
-    owner: repository.owner.login,
-    repo: repository.name,
-    pull_number: number,
-  });
-  return {
-    owner: repository.owner.login,
-    repo: repository.name,
-    pull_number: number,
-    title: prResponse.data.title ?? "",
-    description: prResponse.data.body ?? "",
-  };
+  try {
+    console.log("GITHUB_EVENT_PATH:", process.env.GITHUB_EVENT_PATH);
+    const eventPath = process.env.GITHUB_EVENT_PATH || "";
+    if (!eventPath) {
+      throw new Error("GITHUB_EVENT_PATH environment variable is not set");
+    }
+
+    const eventData = JSON.parse(readFileSync(eventPath, "utf8"));
+    console.log("Event type:", process.env.GITHUB_EVENT_NAME);
+    
+    if (process.env.GITHUB_EVENT_NAME === "issue_comment") {
+        throw new Error("Comment is not on a pull request");
+      }
+      
+      const prUrl = eventData.issue.pull_request.url;
+      console.log("PR URL from comment:", prUrl);
+      
+      const urlParts = prUrl.split('/');
+      const number = parseInt(urlParts[urlParts.length - 1], 10);
+      const repo = urlParts[urlParts.length - 3];
+      const owner = urlParts[urlParts.length - 4];
+      console.log(`Extracted PR info - owner: ${owner}, repo: ${repo}, number: ${number}`);
+      
+      const prResponse = await octokit.pulls.get({
+        owner,
+        repo,
+        pull_number: number,
+      });
+      
+      return {
+        owner,
+        repo,
+        pull_number: number,
+        title: prResponse.data.title ?? "",
+        description: prResponse.data.body ?? "",
+      };
+    }
+    
+    if (!eventData.repository || !eventData.repository.owner) {
+      console.log("Event data:", JSON.stringify(eventData, null, 2));
+      throw new Error("Invalid event data: missing repository information");
+    }
+    const repository = eventData.repository;
+    const number = eventData.number || eventData.pull_request?.number;
+    
+    if (!number) {
+      console.log("Event data:", JSON.stringify(eventData, null, 2));
+      throw new Error("Invalid event data: missing pull request number");
+    }
+    
+    console.log(`PR info - owner: ${repository.owner.login}, repo: ${repository.name}, number: ${number}`);
+    
+    const prResponse = await octokit.pulls.get({
+      owner: repository.owner.login,
+      repo: repository.name,
+      pull_number: number,
+    });
+    
+    return {
+      owner: repository.owner.login,
+      repo: repository.name,
+      pull_number: number,
+      title: prResponse.data.title ?? "",
+      description: prResponse.data.body ?? "",
+    };
+  } catch (error) {
+    console.error("Error in getPRDetails:", error);
+    if (error instanceof Error) {
+      throw new Error(`Failed to get PR details: ${error.message}`);
+    }
+    throw new Error(`Failed to get PR details: ${String(error)}`);
+  }
 }
 
 async function getDiff(

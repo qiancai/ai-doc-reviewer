@@ -26,6 +26,26 @@ inputs:
     description: "Glob patterns to exclude files from the diff analysis"
     required: false
     default: ""
+  REVIEW_MODE:
+    description: "Review mode: 'default', 'single_commit', or 'commit_range'"
+    required: false
+    default: "default"
+  COMMIT_SHA:
+    description: "SHA of the commit to review when REVIEW_MODE is 'single_commit'"
+    required: false
+    default: ""
+  BASE_SHA:
+    description: "Base SHA for commit range review when REVIEW_MODE is 'commit_range'"
+    required: false
+    default: ""
+  HEAD_SHA:
+    description: "Head SHA for commit range review when REVIEW_MODE is 'commit_range'"
+    required: false
+    default: ""
+  ALLOWED_USERS:
+    description: "Comma-separated list of GitHub usernames allowed to trigger reviews via comments"
+    required: false
+    default: ""
 runs:
   using: "node16"
   main: "dist/index.js"
