@@ -27,6 +27,12 @@ AI Doc Reviewer is a GitHub Action forked from [ai-codereviewer](https://github.
     - Review changes between commits
     - Configurable user permissions for triggering manual reviews
 
+- Integration with style guides:
+  
+    - Reference organization-specific style guides and terminology guides
+    - AI reviews documentation against established writing standards
+    - Support for GitHub-hosted style guides in both Markdown and other formats
+
 ## Setup
 
 ### Using OpenAI API
@@ -98,6 +104,8 @@ jobs:
           BASE_SHA: ${{ steps.extract.outputs.BASE_SHA || '' }}
           HEAD_SHA: ${{ steps.extract.outputs.HEAD_SHA || '' }}
           ALLOWED_USERS: "username1,username2"
+          STYLE_GUIDE_URL: "https://github.com/pingcap/docs-cn/blob/master/resources/pingcap-style-guide-zh.pdf"
+          TERMS_GUIDE_URL: "https://github.com/pingcap/docs-cn/blob/master/resources/tidb-terms.md"
 ```
 
 ### Using DeepSeek API
@@ -167,6 +175,8 @@ jobs:
           BASE_SHA: ${{ steps.extract.outputs.BASE_SHA || '' }}
           HEAD_SHA: ${{ steps.extract.outputs.HEAD_SHA || '' }}
           ALLOWED_USERS: "username1,username2"
+          STYLE_GUIDE_URL: "https://github.com/pingcap/docs-cn/blob/master/resources/pingcap-style-guide-zh.pdf"
+          TERMS_GUIDE_URL: "https://github.com/pingcap/docs-cn/blob/master/resources/tidb-terms.md"
 ```
 
 ## Configuration Parameters
@@ -181,6 +191,8 @@ jobs:
 | `DEEPSEEK_API_MODEL` | No | `deepseek-chat` | DeepSeek model to use |
 | `exclude` | No | N/A | Comma-separated glob patterns for files to exclude |
 | `ALLOWED_USERS` | No | N/A | Comma-separated list of GitHub usernames allowed to trigger manual reviews |
+| `STYLE_GUIDE_URL` | No | N/A | URL to a GitHub-hosted style guide for documentation (e.g., https://github.com/pingcap/docs-cn/blob/master/resources/pingcap-style-guide-zh.pdf) |
+| `TERMS_GUIDE_URL` | No | N/A | URL to a GitHub-hosted terminology guide for documentation (e.g., https://github.com/pingcap/docs-cn/blob/master/resources/tidb-terms.md) |
 
 ## Triggering PR review via PR comments
 
@@ -263,6 +275,36 @@ The bot will start the review. After completion, it will add review comments to 
 ```
 ✅ Document review completed! Found 5 issues to address.
 ```
+
+## Using Style Guides
+
+The AI Doc Reviewer can enforce your organization's documentation standards by referencing style guides and terminology guides.
+
+### Setting up style guides
+
+1. Host your style guides and terminology guides in a GitHub repository. These can be markdown files, PDFs, or other readable formats.
+
+2. Add the URLs to these guides in your workflow configuration:
+
+```yaml
+- name: AI Doc Reviewer
+  uses: qiancai/ai-doc-reviewer@main
+  with:
+    # ...other parameters...
+    STYLE_GUIDE_URL: "https://github.com/your-org/docs/blob/main/resources/style-guide.md"
+    TERMS_GUIDE_URL: "https://github.com/your-org/docs/blob/main/resources/terminology.md"
+```
+
+### How it works
+
+When reviewing documentation with style guides enabled:
+
+1. The action fetches the content of the style guides from the provided GitHub URLs
+2. The AI reviewer is instructed to follow the guidelines and terminology in these documents
+3. Review comments will align with your organization's documentation standards
+4. Suggestions will help maintain consistent style, terminology, and formatting
+
+This feature is especially useful for maintaining consistency across large documentation projects with multiple contributors.
 
 ## Contributing
 

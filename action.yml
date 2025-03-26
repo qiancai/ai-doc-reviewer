@@ -46,6 +46,14 @@ inputs:
     description: "Comma-separated list of GitHub usernames allowed to trigger reviews via comments"
     required: false
     default: ""
+  STYLE_GUIDE_URL:
+    description: "URL to a GitHub-hosted style guide for documentation (e.g., https://github.com/pingcap/docs-cn/blob/master/resources/pingcap-style-guide-zh.pdf)"
+    required: false
+    default: ""
+  TERMS_GUIDE_URL:
+    description: "URL to a GitHub-hosted terms glossary for documentation (e.g., https://github.com/pingcap/docs-cn/blob/master/resources/tidb-terms.md)"
+    required: false
+    default: ""
 runs:
   using: "node16"
   main: "dist/index.js"

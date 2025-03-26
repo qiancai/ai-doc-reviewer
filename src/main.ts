@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
+import axios from "axios";
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const API_PROVIDER: string = core.getInput("API_PROVIDER") || "openai";
@@ -16,6 +17,8 @@ const COMMIT_SHA: string = core.getInput("COMMIT_SHA") || "";
 const BASE_SHA: string = core.getInput("BASE_SHA") || "";
 const HEAD_SHA: string = core.getInput("HEAD_SHA") || "";
 const ALLOWED_USERS: string[] = core.getInput("ALLOWED_USERS").split(",").map(u => u.trim());
+const STYLE_GUIDE_URL: string = core.getInput("STYLE_GUIDE_URL") || "";
+const TERMS_GUIDE_URL: string = core.getInput("TERMS_GUIDE_URL") || "";
 
 const octokit = new Octokit({ auth: GITHUB_TOKEN });
 
@@ -133,11 +136,20 @@ async function analyzeCode(
   prDetails: PRDetails
 ): Promise<Array<{ body: string; path: string; line: number }>> {
   const comments: Array<{ body: string; path: string; line: number }> = [];
+  
+  // Fetch style guide content once at the beginning
+  console.log("Fetching style guide content...");
+  const styleGuideContent = await getStyleGuideContent();
+  if (styleGuideContent) {
+    console.log("Style guide content fetched successfully");
+  } else {
+    console.log("No style guide content available or failed to fetch");
+  }
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
     for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails);
+      const prompt = createPrompt(file, chunk, prDetails, styleGuideContent);
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
         const newComments = createComment(file, chunk, aiResponse);
@@ -149,8 +161,71 @@ async function analyzeCode(
   }
   return comments;
 }
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
-  return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. 
+
+// Function to fetch content from GitHub URLs
+async function fetchGitHubContent(url: string): Promise<string | null> {
+  try {
+    if (!url.startsWith('https://github.com/')) {
+      return null;
+    }
+    
+    // Convert GitHub URL to raw content URL
+    // Example: https://github.com/pingcap/docs-cn/blob/master/resources/tidb-terms.md
+    // To: https://raw.githubusercontent.com/pingcap/docs-cn/master/resources/tidb-terms.md
+    const parts = url.replace('https://github.com/', '').split('/');
+    
+    if (parts.length < 5) {
+      console.error(`Invalid GitHub URL format: ${url}`);
+      return null;
+    }
+    
+    const owner = parts[0];
+    const repo = parts[1];
+    const branch = parts[3];
+    const path = parts.slice(4).join('/');
+    
+    const rawUrl = `https://raw.githubusercontent.com/${owner}/${repo}/${branch}/${path}`;
+    console.log(`Fetching content from: ${rawUrl}`);
+    
+    const response = await axios.get(rawUrl, { responseType: 'text' });
+    
+    if (response.status !== 200) {
+      console.error(`Failed to fetch content: ${response.status} ${response.statusText}`);
+      return null;
+    }
+    
+    return response.data;
+  } catch (error) {
+    console.error(`Error fetching GitHub content: ${error instanceof Error ? error.message : String(error)}`);
+    return null;
+  }
+}
+
+// Function to extract style guide content
+async function getStyleGuideContent(): Promise<string> {
+  let styleContent = '';
+  
+  // Fetch style guide if URL is provided
+  if (STYLE_GUIDE_URL) {
+    const content = await fetchGitHubContent(STYLE_GUIDE_URL);
+    if (content) {
+      styleContent += "Style Guide Content:\n\n" + content + "\n\n";
+    }
+  }
+  
+  // Fetch terms guide if URL is provided
+  if (TERMS_GUIDE_URL) {
+    const content = await fetchGitHubContent(TERMS_GUIDE_URL);
+    if (content) {
+      styleContent += "Terms Guide Content:\n\n" + content + "\n\n";
+    }
+  }
+  
+  return styleContent;
+}
+
+function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails, styleGuideContent: string = ""): string {
+  let prompt = `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation according to the provided style guide. 
 
 IMPORTANT: You MUST follow these formatting instructions exactly:
 1. Your response MUST be a valid JSON object with the following structure:
@@ -169,9 +244,14 @@ Review Guidelines:
 - Review the document in the context of the overall user experience and functionality described.
 - Provide "reviews" ONLY if there is something to improve, otherwise "reviews" should be an empty array.
 - Write the review comment in the language of the documentation.
-- For EVERY review comment of a specific line, "suggestion" MUST be the improved version of the original line. If the beginning of the original line contains Markdown syntax such as blank spaces for indentation, "-", "+", "*" for unordered list, or ">" for notes, keep them unchanged.
+- For EVERY review comment of a specific line, "suggestion" MUST be the improved version of the original line. If the beginning of the original line contains Markdown syntax such as blank spaces for indentation, "-", "+", "*" for unordered list, or ">" for notes, keep them unchanged.`;
 
-Example of a valid response:
+  // Add style guide content if available
+  if (styleGuideContent && styleGuideContent.trim() !== "") {
+    prompt += `\n\nPlease use the following style guide to inform your review. Make sure your suggestions follow these style guidelines:\n\n${styleGuideContent}`;
+  }
+
+  prompt += `\n\nExample of a valid response:
 
 {"reviews": [{"lineNumber": 42, "reviewComment": "该句描述不够清晰，建议明确说明压缩效率和压缩率的关系，并补充对默认值的解释。", "suggestion": "设置 raft-engine 在写 raft log 文件时所采用的 lz4 压缩算法的压缩效率，范围 [1, 16]。数值越低，压缩速率越高，但压缩率越低；数值越高，压缩速率越低，但压缩率越高。默认值 1 表示优先考虑压缩速率。"}]}
 
@@ -196,6 +276,8 @@ ${chunk.changes
   .join("\n")}
 \`\`\`
 `;
+
+  return prompt;
 }
 
 async function getAIResponse(prompt: string): Promise<Array<{
@@ -384,14 +466,14 @@ function createComment(
 ): Array<{ body: string; path: string; line: number }> {
   return aiResponses.map((aiResponse: { lineNumber: string; reviewComment: string; suggestion: string }) => {
     if (!file.to) {
-      return [];
+      return null;
     }
     return {
-      body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``, //use four backticks to wrap the suggestion because the response itself might contain code blocks in it
+      body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``,
       path: file.to,
       line: Number(aiResponse.lineNumber),
     };
-  }).flat();
+  }).filter(comment => comment !== null) as Array<{ body: string; path: string; line: number }>;
 }
 
 async function createReviewComment(
