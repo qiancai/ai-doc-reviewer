@@ -1,15 +1,31 @@
-# AI Code Reviewer
+# AI Doc Reviewer
 
-AI Code Reviewer is a GitHub Action that leverages OpenAI's GPT-4 API or Deepseek's API to provide intelligent feedback and suggestions on
-your pull requests. This powerful tool helps improve code quality and saves developers time by automating the code
-review process.
+AI Doc Reviewer is a GitHub Action forked from [ai-codereviewer](https://github.com/aidar-freeed/ai-codereviewer) that leverages AI capabilities to provide intelligent feedback and suggestions on your documentation pull requests. This powerful tool helps improve document quality and saves technical writers time by automating the review process.
 
 ## Features
 
-- Reviews pull requests using OpenAI's GPT-4 API or Deepseek's API.
-- Provides intelligent comments and suggestions for improving your code.
-- Filters out files that match specified exclude patterns.
-- Easy to set up and integrate into your GitHub workflow.
+### Original features (from [ai-codereviewer](https://github.com/aidar-freeed/ai-codereviewer))
+
+- Reviews pull requests using AI-powered analysis
+- Provides intelligent comments and suggestions for improving content
+- Filters out files that match specified exclude patterns
+- Easy to set up and integrate into your GitHub workflow
+
+### New features
+
+- Support for multiple AI providers:
+
+    - OpenAI's GPT-4 API
+    - DeepSeek AI API
+
+- Specialized for documentation review with customized prompts tailored for technical writing
+
+- Support [using PR comments to trigger manual reviews](#triggering-pr-review-via-pr-comments) with various options:
+
+    - Review entire PR
+    - Review specific commits
+    - Review changes between commits
+    - Configurable user permissions for triggering manual reviews
 
 ## Setup
 
@@ -21,86 +37,244 @@ review process.
 2. Add the OpenAI API key as a GitHub Secret in your repository with the name `OPENAI_API_KEY`. You can find more
    information about GitHub Secrets [here](https://docs.github.com/en/actions/reference/encrypted-secrets).
 
-3. Create a `.github/workflows/main.yml` file in your repository and add the following content:
+3. Create a `.github/workflows/doc_review.yml` file in your repository and add the following content:
 
 ```yaml
-name: AI Code Reviewer
+name: AI Doc Review
 
 on:
-  pull_request:
+  #pull_request:
+  #  types:
+  #    - opened
+  #    - synchronize
+  #    - reopened
+  issue_comment:
     types:
-      - opened
-      - synchronize
+      - created
+
 permissions: write-all
+
 jobs:
   review:
     runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request') || 
+      (github.event_name == 'issue_comment' && 
+       github.event.issue.pull_request && 
+       startsWith(github.event.comment.body, '/bot-review'))
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
-
-      - name: AI Code Reviewer
-        uses: your-username/ai-code-reviewer@main
         with:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }} # The GITHUB_TOKEN is there by default so you just need to keep it like it is and not necessarily need to add it as secret as it will throw an error. [More Details](https://docs.github.com/en/actions/security-guides/automatic-token-authentication#about-the-github_token-secret)
-          API_PROVIDER: "openai" # Optional: defaults to "openai"
+          fetch-depth: 0  # Fetch all history for all branches and tags
+
+      - name: Extract review parameters
+        id: extract
+        if: github.event_name == 'issue_comment'
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          if [[ "$COMMENT" =~ /bot-review:\ *([a-fA-F0-9]+) ]]; then
+            echo "COMMIT_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            echo "REVIEW_MODE=single_commit" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ /bot-review:\ *([a-fA-F0-9]+)\ *\.\.\ *([a-fA-F0-9]+) ]]; then
+            echo "BASE_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            echo "HEAD_SHA=${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
+            echo "REVIEW_MODE=commit_range" >> $GITHUB_OUTPUT
+          else
+            echo "REVIEW_MODE=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: AI Doc Reviewer
+        uses: qiancai/ai-doc-reviewer@main
+        continue-on-error: false
+        with:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          API_PROVIDER: "openai"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "gpt-4" # Optional: defaults to "gpt-4"
-          exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          OPENAI_API_MODEL: "gpt-4"
+          exclude: "**/*.json"
+          REVIEW_MODE: ${{ steps.extract.outputs.REVIEW_MODE || 'default' }}
+          COMMIT_SHA: ${{ steps.extract.outputs.COMMIT_SHA || '' }}
+          BASE_SHA: ${{ steps.extract.outputs.BASE_SHA || '' }}
+          HEAD_SHA: ${{ steps.extract.outputs.HEAD_SHA || '' }}
+          ALLOWED_USERS: "username1,username2"
 ```
 
-### Using Deepseek API
+### Using DeepSeek API
 
-1. To use this GitHub Action with Deepseek, you need a Deepseek API key. Sign up for an API key at [Deepseek](https://platform.deepseek.com/).
+1. To use this GitHub Action with DeepSeek, you need a DeepSeek API key. Sign up for an API key at [DeepSeek](https://platform.deepseek.com/).
 
-2. Add the Deepseek API key as a GitHub Secret in your repository with the name `DEEPSEEK_API_KEY`.
+2. Add the DeepSeek API key as a GitHub Secret in your repository with the name `DEEPSEEK_API_KEY`.
 
-3. Create a `.github/workflows/main.yml` file in your repository and add the following content:
+3. Create a `.github/workflows/doc_review.yml` file in your repository and add the following content:
 
 ```yaml
-name: AI Code Reviewer
+name: AI Doc Review
 
 on:
-  pull_request:
+  #pull_request:
+  #  types:
+  #    - opened
+  #    - synchronize
+  #    - reopened
+  issue_comment:
     types:
-      - opened
-      - synchronize
+      - created
+
 permissions: write-all
+
 jobs:
   review:
     runs-on: ubuntu-latest
+    if: |
+      (github.event_name == 'pull_request') || 
+      (github.event_name == 'issue_comment' && 
+       github.event.issue.pull_request && 
+       startsWith(github.event.comment.body, '/bot-review'))
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v3
+        with:
+          fetch-depth: 0  # Fetch all history for all branches and tags
 
-      - name: AI Code Reviewer
-        uses: your-username/ai-code-reviewer@main
+      - name: Extract review parameters
+        id: extract
+        if: github.event_name == 'issue_comment'
+        run: |
+          COMMENT="${{ github.event.comment.body }}"
+          if [[ "$COMMENT" =~ /bot-review:\ *([a-fA-F0-9]+) ]]; then
+            echo "COMMIT_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            echo "REVIEW_MODE=single_commit" >> $GITHUB_OUTPUT
+          elif [[ "$COMMENT" =~ /bot-review:\ *([a-fA-F0-9]+)\ *\.\.\ *([a-fA-F0-9]+) ]]; then
+            echo "BASE_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            echo "HEAD_SHA=${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
+            echo "REVIEW_MODE=commit_range" >> $GITHUB_OUTPUT
+          else
+            echo "REVIEW_MODE=latest" >> $GITHUB_OUTPUT
+          fi
+
+      - name: AI Doc Reviewer
+        uses: qiancai/ai-doc-reviewer@main
+        continue-on-error: false
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           API_PROVIDER: "deepseek"
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DEEPSEEK_API_MODEL: "deepseek-chat" # Optional: defaults to "deepseek-chat"
-          exclude: "**/*.json, **/*.md" # Optional: exclude patterns separated by commas
+          DEEPSEEK_API_MODEL: "deepseek-chat"
+          exclude: "**/*.json"
+          REVIEW_MODE: ${{ steps.extract.outputs.REVIEW_MODE || 'default' }}
+          COMMIT_SHA: ${{ steps.extract.outputs.COMMIT_SHA || '' }}
+          BASE_SHA: ${{ steps.extract.outputs.BASE_SHA || '' }}
+          HEAD_SHA: ${{ steps.extract.outputs.HEAD_SHA || '' }}
+          ALLOWED_USERS: "username1,username2"
 ```
 
-4. Replace `your-username` with your GitHub username or organization name where the AI Code Reviewer repository is
-   located.
+## Configuration Parameters
 
-5. Customize the `exclude` input if you want to ignore certain file patterns from being reviewed.
+| Parameter | Required | Default | Description |
+|-----------|----------|---------|-------------|
+| `GITHUB_TOKEN` | Yes | N/A | GitHub token for API access |
+| `API_PROVIDER` | No | `openai` | AI provider to use (`openai` or `deepseek`) |
+| `OPENAI_API_KEY` | Yes (if using OpenAI) | N/A | Your OpenAI API key |
+| `OPENAI_API_MODEL` | No | `gpt-4` | OpenAI model to use |
+| `DEEPSEEK_API_KEY` | Yes (if using DeepSeek) | N/A | Your DeepSeek API key |
+| `DEEPSEEK_API_MODEL` | No | `deepseek-chat` | DeepSeek model to use |
+| `exclude` | No | N/A | Comma-separated glob patterns for files to exclude |
+| `ALLOWED_USERS` | No | N/A | Comma-separated list of GitHub usernames allowed to trigger manual reviews |
 
-6. Commit the changes to your repository, and AI Code Reviewer will start working on your future pull requests.
+## Triggering PR review via PR comments
 
-## How It Works
+You can manually trigger document reviews by adding comments to pull requests. This is useful for re-running reviews after making changes or for reviewing specific commits.
 
-The AI Code Reviewer GitHub Action retrieves the pull request diff, filters out excluded files, and sends code chunks to
-the selected AI API (OpenAI or Deepseek). It then generates review comments based on the AI's response and adds them to the pull request.
+### Comment format guidelines
+
+All trigger comments must start with `/bot-review` (with or without a colon).
+
+- **Review the latest PR changes:**
+
+    ```
+    /bot-review
+    ```
+
+    This triggers a review of the entire PR in its latest state, equivalent to the automatic review.
+
+- **Review a specific commit:**
+
+    ```
+    /bot-review: 1a2b3c4d
+    ```
+
+   Where `1a2b3c4d` is the SHA of the commit to review. This can be a full SHA or an abbreviated version (at least 7 characters).
+
+- **Review changes between two commits:**
+
+    ```
+    /bot-review: 1a2b3c4d..5e6f7g8h
+    ```
+
+   This will review all changes from `1a2b3c4d` (not included) to `5e6f7g8h` (included).
+
+### Permission requirements
+
+Only users listed in the `ALLOWED_USERS` parameter in the GitHub Action configuration can trigger document reviews.
+
+### Response
+
+After triggering, the bot will:
+
+1. Start the document review process.
+2. Add a comment on the PR when the review is complete, indicating the results.
+3. Add specific review comments and suggestions to relevant document lines if issues are found.
+
+If errors occur during the review, the bot will add an error message to the PR explaining the failure reason.
+
+## How it works
+
+The AI Doc Reviewer GitHub Action works as follows:
+
+1. Retrieves the pull request diff from GitHub.
+2. Filters out excluded files based on your configuration.
+3. Divides document content into appropriate chunks for analysis.
+4. Sends these chunks to the selected AI provider (OpenAI or DeepSeek).
+5. Processes AI responses to generate helpful review comments.
+6. Adds the review comments to the appropriate lines in the pull request.
+
+The reviewer uses specialized prompts designed specifically for technical documentation review, focusing on:
+
+- Clarity and readability
+- Technical accuracy
+- Consistency in terminology
+- Grammar and style
+- Documentation structure
+- User comprehension
+
+## Examples
+
+### Sample PR comment review trigger
+
+To trigger a review on the latest changes in a PR:
+
+```
+/bot-review
+```
+
+The bot will start the review. After completion, it will add review comments to specific lines and post a summary:
+
+```
+✅ Document review completed! Found 5 issues to address.
+```
 
 ## Contributing
 
-Contributions are welcome! Please feel free to submit issues or pull requests to improve the AI Code Reviewer GitHub
-Action.
+Contributions are welcome! Please feel free to submit issues or pull requests to improve the AI Doc Reviewer GitHub Action.
 
-Let the maintainer generate the final package (`yarn build` & `yarn package`).
+To develop locally, take the following steps:
+
+1. Clone the repository.
+2. Install dependencies with `npm install`.
+3. Make your changes.
+4. Test locally.
+5. Let the maintainer generate the final package (`npm run build && npm run package`).
 
 ## License
 

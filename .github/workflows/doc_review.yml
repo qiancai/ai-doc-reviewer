@@ -1,11 +1,11 @@
-name: AI Code Review
+name: AI Doc Review
 
 on:
-  pull_request:
-    types:
-      - opened
-      - synchronize
-      - reopened
+  #pull_request:
+  #  types:
+  #    - opened
+  #    - synchronize
+  #    - reopened
   issue_comment:
     types:
       - created
@@ -42,8 +42,8 @@ jobs:
             echo "REVIEW_MODE=latest" >> $GITHUB_OUTPUT
           fi
 
-      - name: AI Code Reviewer
-        uses: qiancai/ai-codereviewer@test
+      - name: AI Doc Reviewer
+        uses: qiancai/ai-doc-reviewer@main
         continue-on-error: false  # Ensure workflow fails if the action fails
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -55,5 +55,4 @@ jobs:
           COMMIT_SHA: ${{ steps.extract.outputs.COMMIT_SHA || '' }}
           BASE_SHA: ${{ steps.extract.outputs.BASE_SHA || '' }}
           HEAD_SHA: ${{ steps.extract.outputs.HEAD_SHA || '' }}
-          ALLOWED_USERS: "qiancai"  # 允许触发评论的用户，用逗号分隔
-
+          ALLOWED_USERS: "username1,username2"  # The users who can trigger the review, separated by commas.
