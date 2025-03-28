@@ -480,6 +480,10 @@ async function main() {
                 console.log(`User ${commentUser} is not allowed to trigger reviews. Allowed users: ${ALLOWED_USERS.join(", ")}`);
                 return;
             }
+            console.log("REVIEW_MODE from input:", REVIEW_MODE);
+            console.log("COMMIT_SHA from input:", COMMIT_SHA);
+            console.log("BASE_SHA from input:", BASE_SHA);
+            console.log("HEAD_SHA from input:", HEAD_SHA);
             // Get diff based on the comment content
             if (REVIEW_MODE === "single_commit" && COMMIT_SHA) {
                 // Get the diff of a single commit
@@ -500,15 +504,30 @@ async function main() {
                 }
             }
             else if (REVIEW_MODE === "commit_range" && BASE_SHA) {
-                //split the commit range
-                const parts = BASE_SHA.split('..');
-                const baseSha = parts[0];
-                const headSha = parts.length > 1 ? parts[1] : HEAD_SHA;
-                if (!baseSha || !headSha) {
-                    throw new Error(`Invalid commit range: ${BASE_SHA}..${HEAD_SHA}`);
+                // Process commit range
+                console.log("Processing commit range mode");
+                // Get base and head SHAs
+                let baseSha = BASE_SHA;
+                let headSha = HEAD_SHA;
+                // Check if BASE_SHA contains full range format (like "sha1..sha2")
+                if (BASE_SHA.includes('..')) {
+                    const parts = BASE_SHA.split('..');
+                    baseSha = parts[0];
+                    headSha = parts.length > 1 ? parts[1] : HEAD_SHA;
+                    console.log(`BASE_SHA contains '..' pattern, extracted baseSha=${baseSha}, headSha=${headSha}`);
                 }
-                console.log(`Reviewing commit range: ${baseSha} to ${headSha}`);
+                else {
+                    console.log(`Using separate BASE_SHA and HEAD_SHA values: base=${baseSha}, head=${headSha}`);
+                }
+                // Trim any whitespace that might have been included in the SHAs
+                baseSha = baseSha.trim();
+                headSha = headSha.trim();
+                if (!baseSha || !headSha) {
+                    throw new Error(`Invalid commit range: ${baseSha}..${headSha}`);
+                }
+                console.log(`Comparing commit range: ${baseSha} → ${headSha}`);
                 try {
+                    console.log(`Calling GitHub API to compare commits - owner: ${prDetails.owner}, repo: ${prDetails.repo}`);
                     const response = await octokit.repos.compareCommits({
                         owner: prDetails.owner,
                         repo: prDetails.repo,
