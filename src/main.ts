@@ -133,11 +133,29 @@ async function analyzeCode(
   prDetails: PRDetails
 ): Promise<Array<{ body: string; path: string; line: number }>> {
   const comments: Array<{ body: string; path: string; line: number }> = [];
+  
+  console.log(`Analyzing ${parsedDiff.length} files from diff:`);
+  for (const file of parsedDiff) {
+    console.log(`- File: ${file.to || '[deleted]'}, chunks: ${file.chunks?.length || 0}`);
+  }
 
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
     for (const chunk of file.chunks) {
       const prompt = createPrompt(file, chunk, prDetails);
+      
+      // Get starting line number safely by checking the type of change
+      const firstChange = chunk.changes[0] || {};
+      let startLine = 'unknown';
+      if ('ln' in firstChange) {
+        startLine = String(firstChange.ln);
+      } else if ('ln2' in firstChange) {
+        startLine = String(firstChange.ln2);
+      }
+      
+      console.log(`Sending to AI - File: ${file.to}, Chunk starting at line: ${startLine}`);
+      console.log(`AI Prompt preview (first 500 chars): ${prompt.substring(0, 500)}...`);
+      
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
         const newComments = createComment(file, chunk, aiResponse);
@@ -149,6 +167,7 @@ async function analyzeCode(
   }
   return comments;
 }
+
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
   return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. 
 
@@ -600,6 +619,14 @@ async function main() {
           diff = typeof response.data === 'string' ? response.data : String(response.data);
           console.log("Diff length:", diff.length);
           console.log("Diff preview (first 200 chars):", diff.substring(0, 200));
+          console.log("Number of files changed in diff:", (diff.match(/^diff --git/gm) || []).length);
+          
+          // Debug - log the file paths in the diff
+          const fileMatches = diff.match(/^diff --git a\/(.*?) b\/(.*?)$/gm);
+          if (fileMatches) {
+            console.log("Files in diff:", fileMatches.map(m => m.replace(/^diff --git a\/.*? b\//, '')).slice(0, 10).join(', ') + 
+              (fileMatches.length > 10 ? ` and ${fileMatches.length - 10} more...` : ''));
+          }
         } catch (apiError) {
           handleGitHubPermissionError(apiError, prDetails, isCommentTrigger);
           console.error("Error calling GitHub API:", apiError);
