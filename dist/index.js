@@ -242,10 +242,15 @@ async function getOpenAIResponse(prompt) {
         presence_penalty: 0,
     };
     try {
+        // Check if the model supports the JSON response format
+        const supportsJsonFormat = OPENAI_API_MODEL.includes("gpt-4-turbo") ||
+            OPENAI_API_MODEL.includes("gpt-4-0125") ||
+            OPENAI_API_MODEL.includes("gpt-4-1106") ||
+            OPENAI_API_MODEL.includes("gpt-3.5-turbo-1106");
         const response = await openai.chat.completions.create({
             ...queryConfig,
-            // return JSON if the model supports it:
-            ...(OPENAI_API_MODEL.includes("gpt-4") || OPENAI_API_MODEL.includes("1106-preview")
+            // Only add response_format if the model supports it
+            ...(supportsJsonFormat
                 ? { response_format: { type: "json_object" } }
                 : {}),
             messages: [
@@ -479,14 +484,20 @@ async function main() {
             if (REVIEW_MODE === "single_commit" && COMMIT_SHA) {
                 // Get the diff of a single commit
                 console.log(`Reviewing single commit: ${COMMIT_SHA}`);
-                const response = await octokit.repos.getCommit({
-                    owner: prDetails.owner,
-                    repo: prDetails.repo,
-                    ref: COMMIT_SHA,
-                    mediaType: { format: "diff" }
-                });
-                // @ts-expect-error - response.data is a string
-                diff = response.data;
+                try {
+                    const response = await octokit.repos.getCommit({
+                        owner: prDetails.owner,
+                        repo: prDetails.repo,
+                        ref: COMMIT_SHA,
+                        mediaType: { format: "diff" }
+                    });
+                    // @ts-expect-error - response.data is a string
+                    diff = response.data;
+                }
+                catch (error) {
+                    handleGitHubPermissionError(error, prDetails, isCommentTrigger);
+                    throw error;
+                }
             }
             else if (REVIEW_MODE === "commit_range" && BASE_SHA) {
                 //split the commit range
@@ -515,6 +526,7 @@ async function main() {
                     console.log("Diff preview (first 200 chars):", diff.substring(0, 200));
                 }
                 catch (apiError) {
+                    handleGitHubPermissionError(apiError, prDetails, isCommentTrigger);
                     console.error("Error calling GitHub API:", apiError);
                     throw new Error(`Failed to get diff from GitHub API: ${apiError instanceof Error ? apiError.message : String(apiError)}`);
                 }
@@ -522,25 +534,47 @@ async function main() {
             else {
                 // Get the diff of the latest PR changes
                 console.log("Reviewing latest PR changes");
-                diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+                try {
+                    diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+                    if (!diff) {
+                        throw new Error("No diff returned from GitHub API");
+                    }
+                }
+                catch (diffError) {
+                    handleGitHubPermissionError(diffError, prDetails, isCommentTrigger);
+                    console.error("Error getting PR diff:", diffError);
+                    throw diffError;
+                }
             }
         }
         else if (eventData.action === "opened") {
-            diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+            try {
+                diff = await getDiff(prDetails.owner, prDetails.repo, prDetails.pull_number);
+            }
+            catch (error) {
+                handleGitHubPermissionError(error, prDetails, isCommentTrigger);
+                throw error;
+            }
         }
         else if (eventData.action === "synchronize") {
             const newBaseSha = eventData.before;
             const newHeadSha = eventData.after;
-            const response = await octokit.repos.compareCommits({
-                headers: {
-                    accept: "application/vnd.github.v3.diff",
-                },
-                owner: prDetails.owner,
-                repo: prDetails.repo,
-                base: newBaseSha,
-                head: newHeadSha,
-            });
-            diff = String(response.data);
+            try {
+                const response = await octokit.repos.compareCommits({
+                    headers: {
+                        accept: "application/vnd.github.v3.diff",
+                    },
+                    owner: prDetails.owner,
+                    repo: prDetails.repo,
+                    base: newBaseSha,
+                    head: newHeadSha,
+                });
+                diff = String(response.data);
+            }
+            catch (error) {
+                handleGitHubPermissionError(error, prDetails, isCommentTrigger);
+                throw error;
+            }
         }
         else {
             console.log("Unsupported event:", process.env.GITHUB_EVENT_NAME);
@@ -657,6 +691,29 @@ async function main() {
         // Ensure the process exits with a non-zero status code
         process.exit(1);
     }
+}
+// Helper function to handle GitHub permission errors
+function handleGitHubPermissionError(error, prDetails, isCommentTrigger) {
+    if (error instanceof Error && error.message.includes("Resource not accessible by integration")) {
+        console.log("GitHub permission error detected. Checking if we can notify the user...");
+        if (isCommentTrigger) {
+            try {
+                octokit.issues.createComment({
+                    owner: prDetails.owner,
+                    repo: prDetails.repo,
+                    issue_number: prDetails.pull_number,
+                    body: `❌ Code review failed: Insufficient permissions to access repository data. Please check the GitHub token permissions and make sure it has access to the repository contents and pull requests.`
+                }).catch(commentError => {
+                    console.error("Also failed to post error comment:", commentError);
+                });
+            }
+            catch (commentError) {
+                console.error("Failed to post permission error comment:", commentError);
+            }
+        }
+        return true;
+    }
+    return false;
 }
 main().catch((error) => {
     console.error("Error:", error);
