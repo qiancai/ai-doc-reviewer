@@ -235,7 +235,7 @@ async function getOpenAIResponse(prompt) {
     }
     const queryConfig = {
         model: OPENAI_API_MODEL,
-        temperature: 0.2,
+        temperature: 0.1,
         max_tokens: 800,
         top_p: 1,
         frequency_penalty: 0,
@@ -245,22 +245,72 @@ async function getOpenAIResponse(prompt) {
         const response = await openai.chat.completions.create({
             ...queryConfig,
             // return JSON if the model supports it:
-            ...(OPENAI_API_MODEL === "gpt-4-1106-preview"
+            ...(OPENAI_API_MODEL.includes("gpt-4") || OPENAI_API_MODEL.includes("1106-preview")
                 ? { response_format: { type: "json_object" } }
                 : {}),
             messages: [
                 {
                     role: "system",
-                    content: prompt,
+                    content: "You are an expert technical writer who provides detailed, helpful documentation reviews in JSON format."
                 },
-            ],
+                {
+                    role: "user",
+                    content: prompt
+                }
+            ]
         });
         const res = ((_b = (_a = response.choices[0].message) === null || _a === void 0 ? void 0 : _a.content) === null || _b === void 0 ? void 0 : _b.trim()) || "{}";
-        return JSON.parse(res).reviews;
+        console.log("AI response:", res.substring(0, 100) + (res.length > 100 ? "..." : ""));
+        // Try several approaches to extract valid JSON
+        // First, try direct parsing
+        try {
+            const parsed = JSON.parse(res);
+            if (parsed.reviews && Array.isArray(parsed.reviews)) {
+                return parsed.reviews;
+            }
+            else {
+                console.log("Response doesn't contain valid reviews array:", res);
+            }
+        }
+        catch (parseError) {
+            console.error("Error parsing OpenAI response as JSON:", parseError);
+        }
+        // Second, look for JSON-like patterns in the response
+        try {
+            const jsonRegex = /\{(?:"reviews"|'reviews'):\s*\[(.*?)\]\}/s;
+            const match = res.match(jsonRegex);
+            if (match) {
+                const jsonString = match[0].replace(/'/g, '"');
+                const parsed = JSON.parse(jsonString);
+                if (parsed.reviews && Array.isArray(parsed.reviews)) {
+                    return parsed.reviews;
+                }
+            }
+        }
+        catch (regexParseError) {
+            console.error("Failed to extract JSON with regex:", regexParseError);
+        }
+        // Finally, try to extract from code blocks
+        try {
+            const codeBlockRegex = /```(?:json)?\s*(\{[\s\S]*?\})\s*```/;
+            const match = res.match(codeBlockRegex);
+            if (match && match[1]) {
+                const jsonString = match[1];
+                const parsed = JSON.parse(jsonString);
+                if (parsed.reviews && Array.isArray(parsed.reviews)) {
+                    return parsed.reviews;
+                }
+            }
+        }
+        catch (blockParseError) {
+            console.error("Failed to extract JSON from code block:", blockParseError);
+        }
+        console.error("All JSON parsing approaches failed");
+        return [];
     }
     catch (error) {
         console.error("Error with OpenAI API:", error);
-        return null;
+        return [];
     }
 }
 async function getDeepseekResponse(prompt) {
@@ -361,13 +411,32 @@ function createComment(file, chunk, aiResponses) {
     }).flat();
 }
 async function createReviewComment(owner, repo, pull_number, comments) {
-    await octokit.pulls.createReview({
-        owner,
-        repo,
-        pull_number,
-        comments,
-        event: "COMMENT",
-    });
+    try {
+        await octokit.pulls.createReview({
+            owner,
+            repo,
+            pull_number,
+            comments,
+            event: "COMMENT",
+        });
+    }
+    catch (error) {
+        console.error("Error creating review comment:", error);
+        // If we get "Resource not accessible by integration" error, try to post a comment instead
+        if (error instanceof Error && error.message.includes("Resource not accessible by integration")) {
+            console.log("Permissions issue detected. Attempting to post a regular comment instead...");
+            const commentBody = `### AI Review Comments\n\n${comments.map(c => `**File:** ${c.path}, **Line:** ${c.line}\n${c.body}\n\n---\n`).join('\n')}`;
+            await octokit.issues.createComment({
+                owner,
+                repo,
+                issue_number: pull_number,
+                body: commentBody
+            });
+        }
+        else {
+            throw error;
+        }
+    }
 }
 // Helper function to get the line number from a change
 function getChangeLineNumber(change, lineNumber) {
@@ -510,15 +579,25 @@ async function main() {
         try {
             const comments = await analyzeCode(filteredDiff, prDetails);
             if (comments.length > 0) {
-                await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
-                // If the comment is triggered, reply a comment to indicate the completion
-                if (isCommentTrigger) {
-                    await octokit.issues.createComment({
-                        owner: prDetails.owner,
-                        repo: prDetails.repo,
-                        issue_number: prDetails.pull_number,
-                        body: `✅ Code review completed, ${comments.length} comments generated.`
-                    });
+                try {
+                    await createReviewComment(prDetails.owner, prDetails.repo, prDetails.pull_number, comments);
+                    // If the comment is triggered, reply a comment to indicate the completion
+                    if (isCommentTrigger) {
+                        await octokit.issues.createComment({
+                            owner: prDetails.owner,
+                            repo: prDetails.repo,
+                            issue_number: prDetails.pull_number,
+                            body: `✅ Code review completed, ${comments.length} comments generated.`
+                        });
+                    }
+                }
+                catch (reviewError) {
+                    hadCriticalErrors = true;
+                    console.error("Error creating review comments:", reviewError);
+                    // If this is a permissions issue, we have already tried the fallback in createReviewComment
+                    if (!(reviewError instanceof Error && reviewError.message.includes("Resource not accessible by integration"))) {
+                        throw reviewError;
+                    }
                 }
             }
             else {
