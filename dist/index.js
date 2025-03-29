@@ -192,7 +192,7 @@ Example of a valid response:
 
 {"reviews": [{"lineNumber": 42, "reviewComment": "该句描述不够清晰，建议明确说明压缩效率和压缩率的关系，并补充对默认值的解释。", "suggestion": "设置 raft-engine 在写 raft log 文件时所采用的 lz4 压缩算法的压缩效率，范围 [1, 16]。数值越低，压缩速率越高，但压缩率越低；数值越高，压缩速率越低，但压缩率越高。默认值 1 表示优先考虑压缩速率。"}]}
 
-Review the following code diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
+Review the following diff in the file "${file.to}" and take the pull request title and description into account when writing the response.
 
 Pull request title: ${prDetails.title}
 Pull request description:
@@ -656,7 +656,7 @@ async function main() {
                     owner: prDetails.owner,
                     repo: prDetails.repo,
                     issue_number: prDetails.pull_number,
-                    body: `✅ Code review completed, no files to review after filtering.`
+                    body: `✅ AI review completed, no files to review after filtering.`
                 });
             }
             return;
@@ -674,7 +674,7 @@ async function main() {
                             owner: prDetails.owner,
                             repo: prDetails.repo,
                             issue_number: prDetails.pull_number,
-                            body: `✅ Code review completed, ${comments.length} comments generated.`
+                            body: `✅ AI review completed, ${comments.length} comments generated.`
                         });
                     }
                 }
@@ -694,7 +694,7 @@ async function main() {
                         owner: prDetails.owner,
                         repo: prDetails.repo,
                         issue_number: prDetails.pull_number,
-                        body: `✅ Code review completed, no issues found.`
+                        body: `✅ AI review completed, no issues found.`
                     });
                 }
             }
@@ -702,43 +702,43 @@ async function main() {
         catch (analyzeError) {
             hadCriticalErrors = true;
             if (analyzeError instanceof Error) {
-                core.setFailed(`Critical error during code analysis: ${analyzeError.message}`);
+                core.setFailed(`Critical error during analysis: ${analyzeError.message}`);
                 // If the comment is triggered, reply the error information
                 if (isCommentTrigger) {
                     await octokit.issues.createComment({
                         owner: prDetails.owner,
                         repo: prDetails.repo,
                         issue_number: prDetails.pull_number,
-                        body: `❌ Code review failed: ${analyzeError.message}`
+                        body: `❌ AI review failed: ${analyzeError.message}`
                     });
                 }
             }
             else {
-                core.setFailed(`Unknown critical error during code analysis: ${analyzeError}`);
+                core.setFailed(`Unknown critical error during analysis: ${analyzeError}`);
                 // If the comment is triggered, reply the error information
                 if (isCommentTrigger) {
                     await octokit.issues.createComment({
                         owner: prDetails.owner,
                         repo: prDetails.repo,
                         issue_number: prDetails.pull_number,
-                        body: `❌ Code review failed: Unknown error`
+                        body: `❌ AI review failed: Unknown error`
                     });
                 }
             }
         }
         // Only report success if we didn't have critical errors
         if (!hadCriticalErrors) {
-            core.info("AI Code Review completed successfully");
+            core.info("AI Review completed successfully");
         }
     }
     catch (error) {
         // Log the error details
         if (error instanceof Error) {
-            core.setFailed(`Error in AI Code Review: ${error.message}`);
+            core.setFailed(`Error in AI Review: ${error.message}`);
             console.error("Error details:", error.stack);
         }
         else {
-            core.setFailed(`Unknown error in AI Code Review: ${error}`);
+            core.setFailed(`Unknown error in AI Review: ${error}`);
             console.error("Unknown error:", error);
         }
         // Ensure the process exits with a non-zero status code
@@ -755,7 +755,7 @@ function handleGitHubPermissionError(error, prDetails, isCommentTrigger) {
                     owner: prDetails.owner,
                     repo: prDetails.repo,
                     issue_number: prDetails.pull_number,
-                    body: `❌ Code review failed: Insufficient permissions to access repository data. Please check the GitHub token permissions and make sure it has access to the repository contents and pull requests.`
+                    body: `❌ Review failed: Insufficient permissions to access repository data. Please check the GitHub token permissions and make sure it has access to the repository contents and pull requests.`
                 }).catch(commentError => {
                     console.error("Also failed to post error comment:", commentError);
                 });
@@ -770,7 +770,7 @@ function handleGitHubPermissionError(error, prDetails, isCommentTrigger) {
 }
 main().catch((error) => {
     console.error("Error:", error);
-    core.setFailed(`Unhandled error in AI Code Review: ${error}`);
+    core.setFailed(`Unhandled error in AI Review: ${error}`);
     process.exit(1);
 });
 
