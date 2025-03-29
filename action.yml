@@ -45,7 +45,7 @@ inputs:
   PROMPT_PATH:
     description: "Path to the review prompt template file"
     required: false
-    default: "review-prompt.txt"
+    default: ""
 runs:
   using: "node16"
   main: "dist/index.js"
