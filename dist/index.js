@@ -49,7 +49,8 @@ const REVIEW_MODE = core.getInput("REVIEW_MODE") || "default";
 const COMMIT_SHA = core.getInput("COMMIT_SHA") || "";
 const BASE_SHA = core.getInput("BASE_SHA") || "";
 const HEAD_SHA = core.getInput("HEAD_SHA") || "";
-const ALLOWED_USERS = core.getInput("ALLOWED_USERS").split(",").map(u => u.trim());
+// ALLOWED_USERS is no longer needed as permission checking is handled at the workflow level
+// const ALLOWED_USERS: string[] = core.getInput("ALLOWED_USERS").split(",").map(u => u.trim());
 const octokit = new rest_1.Octokit({ auth: GITHUB_TOKEN });
 // Initialize OpenAI client if using OpenAI
 const openai = API_PROVIDER === "openai"
@@ -490,16 +491,26 @@ async function main() {
         // Check if the comment is triggered
         const isCommentTrigger = process.env.GITHUB_EVENT_NAME === "issue_comment";
         if (isCommentTrigger) {
-            // Check if the comment user has permission to trigger reviews
             const commentUser = eventData.comment.user.login;
-            if (ALLOWED_USERS.length > 0 && !ALLOWED_USERS.includes(commentUser)) {
-                console.log(`User ${commentUser} is not allowed to trigger reviews. Allowed users: ${ALLOWED_USERS.join(", ")}`);
-                return;
-            }
             console.log("REVIEW_MODE from input:", REVIEW_MODE);
             console.log("COMMIT_SHA from input:", COMMIT_SHA);
             console.log("BASE_SHA from input:", BASE_SHA);
             console.log("HEAD_SHA from input:", HEAD_SHA);
+            console.log("Raw comment body:", eventData.comment.body);
+            // Handle invalid review mode
+            if (REVIEW_MODE === "invalid") {
+                console.log("Invalid bot-review command format detected");
+                await octokit.issues.createComment({
+                    owner: prDetails.owner,
+                    repo: prDetails.repo,
+                    issue_number: prDetails.pull_number,
+                    body: `❌ Invalid command format. Valid formats are:
+- \`/bot-review\` - Review latest changes
+- \`/bot-review: <commit-sha>\` - Review a single commit
+- \`/bot-review: <base>..<head>\` - Review a commit range`
+                });
+                return;
+            }
             // Get diff based on the comment content
             if (REVIEW_MODE === "single_commit" && COMMIT_SHA) {
                 // Get the diff of a single commit
