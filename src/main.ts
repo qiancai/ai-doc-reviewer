@@ -4,6 +4,7 @@ import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
 import parseDiff, { Chunk, File } from "parse-diff";
 import minimatch from "minimatch";
+import path from "path";
 
 const GITHUB_TOKEN: string = core.getInput("GITHUB_TOKEN");
 const API_PROVIDER: string = core.getInput("API_PROVIDER") || "openai";
@@ -15,6 +16,7 @@ const REVIEW_MODE: string = core.getInput("REVIEW_MODE") || "default";
 const COMMIT_SHA: string = core.getInput("COMMIT_SHA") || "";
 const BASE_SHA: string = core.getInput("BASE_SHA") || "";
 const HEAD_SHA: string = core.getInput("HEAD_SHA") || "";
+const PROMPT_PATH: string = core.getInput("PROMPT_PATH") || "";
 // ALLOWED_USERS is no longer needed as permission checking is handled at the workflow level
 // const ALLOWED_USERS: string[] = core.getInput("ALLOWED_USERS").split(",").map(u => u.trim());
 
@@ -170,7 +172,8 @@ async function analyzeCode(
 }
 
 function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
-  return `As a technical writer who has profound knowledge of databases, your task is to review pull requests of TiDB user documentation. 
+  // Default prompt template that will be used if the file doesn't exist
+  const defaultPromptTemplate = `As a technical writer who has profound knowledge, your task is to review pull requests of user documentation.
 
 IMPORTANT: You MUST follow these formatting instructions exactly:
 1. Your response MUST be a valid JSON object with the following structure:
@@ -193,29 +196,75 @@ Review Guidelines:
 
 Example of a valid response:
 
-{"reviews": [{"lineNumber": 42, "reviewComment": "该句描述不够清晰，建议明确说明压缩效率和压缩率的关系，并补充对默认值的解释。", "suggestion": "设置 raft-engine 在写 raft log 文件时所采用的 lz4 压缩算法的压缩效率，范围 [1, 16]。数值越低，压缩速率越高，但压缩率越低；数值越高，压缩速率越低，但压缩率越高。默认值 1 表示优先考虑压缩速率。"}]}
+{"reviews": [{"lineNumber": 42, "reviewComment": "The sentence is not clear enough. It is recommended to clarify the relationship between compression efficiency and compression rate, and to supplement the explanation of the default value.", "suggestion": "Set the compression efficiency of the lz4 compression algorithm used when writing raft log files to raft-engine, ranging from 1 to 16. The lower the value, the higher the compression rate, but the lower the compression rate; the higher the value, the lower the compression rate, but the higher the compression rate. The default value is 1, which means to prioritize compression rate."}]}
 
-Review the following diff in the file "${
-    file.to
-  }" and take the pull request title and description into account when writing the response.
+Review the following diff in the file "\${filename}" and take the pull request title and description into account when writing the response.
 
-Pull request title: ${prDetails.title}
+Pull request title: \${title}
 Pull request description:
 
 ---
-${prDetails.description}
+\${description}
 ---
 
 Git diff to review:
 
 \`\`\`diff
-${chunk.content}
-${chunk.changes
-  // @ts-expect-error - ln and ln2 exists where needed
-  .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
-  .join("\n")}
-\`\`\`
-`;
+\${diff_content}
+\${diff_changes}
+\`\`\``;
+
+  try {
+    // Read the template file from the configured path
+    // If it's a relative path, resolve it from the current working directory
+    const templatePath = path.isAbsolute(PROMPT_PATH)
+      ? PROMPT_PATH
+      : path.resolve(process.cwd(), PROMPT_PATH);
+    
+    try {
+      // Check if file exists before trying to read it
+      readFileSync(templatePath, { encoding: 'utf8', flag: 'r' });
+      console.log(`✅ Using custom prompt template from: ${templatePath}`);
+      core.info(`Using custom prompt template from: ${templatePath}`);
+      let template = readFileSync(templatePath, 'utf8');
+      
+      // Replace placeholders with actual values - using global replacement
+      template = template
+        .replace(/\${filename}/g, file.to || '')
+        .replace(/\${title}/g, prDetails.title)
+        .replace(/\${description}/g, prDetails.description)
+        .replace(/\${diff_content}/g, chunk.content)
+        .replace(/\${diff_changes}/g, chunk.changes
+          // @ts-expect-error - ln and ln2 exists where needed
+          .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
+          .join("\n"));
+      
+      return template;
+    } catch (fileError) {
+      // File doesn't exist or can't be read, fall back to default prompt
+      console.log(`⚠️ Custom prompt file not found at: ${templatePath}. Using default prompt.`);
+      core.warning(`Custom prompt file not found at: ${templatePath}. Using default prompt.`);
+      
+      // Use the default prompt template
+      let template = defaultPromptTemplate;
+      
+      // Replace placeholders with actual values - using global replacement
+      template = template
+        .replace(/\${filename}/g, file.to || '')
+        .replace(/\${title}/g, prDetails.title)
+        .replace(/\${description}/g, prDetails.description)
+        .replace(/\${diff_content}/g, chunk.content)
+        .replace(/\${diff_changes}/g, chunk.changes
+          // @ts-expect-error - ln and ln2 exists where needed
+          .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
+          .join("\n"));
+      
+      return template;
+    }
+  } catch (error) {
+    console.error(`Error in createPrompt:`, error);
+    throw new Error(`Failed to create prompt: ${error instanceof Error ? error.message : String(error)}`);
+  }
 }
 
 async function getAIResponse(prompt: string): Promise<Array<{

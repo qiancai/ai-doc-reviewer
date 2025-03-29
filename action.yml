@@ -42,6 +42,10 @@ inputs:
     description: "Head SHA for commit range review when REVIEW_MODE is 'commit_range'"
     required: false
     default: ""
+  PROMPT_PATH:
+    description: "Path to the review prompt template file"
+    required: false
+    default: "review-prompt.txt"
 runs:
   using: "node16"
   main: "dist/index.js"

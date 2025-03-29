@@ -82,3 +82,4 @@ jobs:
           COMMIT_SHA: ${{ steps.extract.outputs.COMMIT_SHA || '' }}
           BASE_SHA: ${{ steps.extract.outputs.BASE_SHA || '' }}
           HEAD_SHA: ${{ steps.extract.outputs.HEAD_SHA || '' }}
+          PROMPT_PATH: "review-prompt.txt"
