@@ -42,10 +42,6 @@ inputs:
     description: "Head SHA for commit range review when REVIEW_MODE is 'commit_range'"
     required: false
     default: ""
-  ALLOWED_USERS:
-    description: "Comma-separated list of GitHub usernames allowed to trigger reviews via comments"
-    required: false
-    default: ""
 runs:
   using: "node16"
   main: "dist/index.js"
