@@ -327,6 +327,29 @@ async function getOpenAIResponse(prompt: string): Promise<Array<{
                               OPENAI_API_MODEL.includes("gpt-4-0125") || 
                               OPENAI_API_MODEL.includes("gpt-4-1106") || 
                               OPENAI_API_MODEL.includes("gpt-3.5-turbo-1106");
+    
+    // Implement MCP for OpenAI
+    const messages = [
+      {
+        role: "system",
+        content: "You are an expert technical writer who provides detailed, helpful documentation reviews in JSON format."
+      }
+    ];
+    
+    // Add structured context using MCP
+    messages.push({
+      role: "user",
+      content: [
+        {
+          type: "text",
+          text: "I need you to review some documentation changes for a pull request. Here is the necessary context:"
+        },
+        {
+          type: "text", 
+          text: prompt
+        }
+      ]
+    });
 
     const response = await openai.chat.completions.create({
       ...queryConfig,
@@ -334,16 +357,7 @@ async function getOpenAIResponse(prompt: string): Promise<Array<{
       ...(supportsJsonFormat
         ? { response_format: { type: "json_object" } }
         : {}),
-      messages: [
-        {
-          role: "system",
-          content: "You are an expert technical writer who provides detailed, helpful documentation reviews in JSON format."
-        },
-        {
-          role: "user",
-          content: prompt
-        }
-      ]
+      messages: messages
     });
 
     const res = response.choices[0].message?.content?.trim() || "{}";
@@ -412,31 +426,27 @@ async function getDeepseekResponse(prompt: string): Promise<Array<{
     return null;
   }
 
-  //console.log("Calling Deepseek API...");
-  //console.log("Available Deepseek models: deepseek-chat, deepseek-coder");
+  // Implement MCP for Deepseek
+  const messages = [
+    {
+      role: "system",
+      content: "You are an expert technical writer who provides detailed, helpful documentation reviews in JSON format."
+    },
+    {
+      role: "user",
+      content: prompt
+    }
+  ];
   
   const requestBody = {
     model: DEEPSEEK_API_MODEL,
-    messages: [
-      {
-        role: "user",
-        content: prompt
-      }
-    ],
+    messages: messages,
     temperature: 0.2,
     max_tokens: 800,
     top_p: 1,
     frequency_penalty: 0,
     presence_penalty: 0
   };
-  
-  //console.log(`Using Deepseek model: ${DEEPSEEK_API_MODEL}`);
-  //console.log("Request body structure:", JSON.stringify({
-  //  model: DEEPSEEK_API_MODEL,
-  //  messages: [{role: "user", content: "prompt content (truncated)"}],
-  //  temperature: 0.2,
-  //  max_tokens: 800
-  //}));
   
   const response = await fetch("https://api.deepseek.com/v1/chat/completions", {
     method: "POST",
