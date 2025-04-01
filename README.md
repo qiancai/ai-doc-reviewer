@@ -20,7 +20,7 @@ AI Doc Reviewer is a GitHub Action forked from [ai-codereviewer](https://github.
 
 - Enhanced documentation review performance with [customized prompts](#customize-prompts) configured in your own repository and tailored for technical writing
 
-- Flexible [PR comment-based review triggers](#comment-format-guidelines) with various options:
+- Flexible [PR comment-based review triggers](#how-to-trigger-a-review) with various options:
 
     - Review the entire PR
     - Review specific commits
