@@ -11,21 +11,20 @@ AI Doc Reviewer is a GitHub Action forked from [ai-codereviewer](https://github.
 - Filters out files that match specified exclude patterns
 - Easy to set up and integrate into your GitHub workflow
 
-### New features
+### New features in AI Doc Reviewer
 
 - Support for multiple AI providers:
 
-    - OpenAI's GPT-4 API
+    - OpenAI GPT-4 API
     - DeepSeek AI API
 
-- Specialized for documentation review with customized prompts tailored for technical writing
+- Enhanced documentation review performance with [customized prompts](#customize-prompts) configured in your own repository and tailored for technical writing
 
-- Support [using PR comments to trigger manual reviews](#triggering-pr-review-via-pr-comments) with various options:
+- Flexible [PR comment-based review triggers](#comment-format-guidelines) with various options:
 
-    - Review entire PR
+    - Review the entire PR
     - Review specific commits
     - Review changes between commits
-    - Configurable user permissions for triggering manual reviews
 
 ## Setup
 
@@ -34,8 +33,7 @@ AI Doc Reviewer is a GitHub Action forked from [ai-codereviewer](https://github.
 1. To use this GitHub Action with OpenAI, you need an OpenAI API key. If you don't have one, sign up for an API key
    at [OpenAI](https://beta.openai.com/signup).
 
-2. Add the OpenAI API key as a GitHub Secret in your repository with the name `OPENAI_API_KEY`. You can find more
-   information about GitHub Secrets [here](https://docs.github.com/en/actions/reference/encrypted-secrets).
+2. Add the OpenAI API key as a GitHub Secret in your repository with the name `OPENAI_API_KEY`. You can find more information about GitHub Secrets [here](https://docs.github.com/en/actions/reference/encrypted-secrets).
 
 3. Create a `.github/workflows/doc_review.yml` file in your repository and add the following content:
 
@@ -43,26 +41,35 @@ AI Doc Reviewer is a GitHub Action forked from [ai-codereviewer](https://github.
 name: AI Doc Review
 
 on:
-  #pull_request:
-  #  types:
-  #    - opened
-  #    - synchronize
-  #    - reopened
+  workflow_dispatch:
+
   issue_comment:
     types:
       - created
 
-permissions: write-all
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
   review:
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'pull_request') || 
-      (github.event_name == 'issue_comment' && 
-       github.event.issue.pull_request && 
-       startsWith(github.event.comment.body, '/bot-review'))
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '/bot-review') &&
+        contains('username1, username2, username3', github.event.comment.user.login)
+      )
     steps:
+      - name: Debug Info
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Event type: ${{ github.event.action }}"
+          echo "Comment body: ${{ github.event.comment.body || 'No comment body' }}"
+          echo "Comment author: ${{ github.event.comment.user.login || 'No user' }}"
+
       - name: Checkout Repo
         uses: actions/checkout@v3
         with:
@@ -73,31 +80,49 @@ jobs:
         if: github.event_name == 'issue_comment'
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          if [[ "$COMMENT" =~ /bot-review:\ *([a-fA-F0-9]+) ]]; then
-            echo "COMMIT_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-            echo "REVIEW_MODE=single_commit" >> $GITHUB_OUTPUT
-          elif [[ "$COMMENT" =~ /bot-review:\ *([a-fA-F0-9]+)\ *\.\.\ *([a-fA-F0-9]+) ]]; then
+          echo "Raw comment: $COMMENT"
+
+          # Match commit range
+          if [[ "$COMMENT" =~ \/bot-review:[[:space:]]*([a-f0-9]{7,40})[[:space:]]*\.\.[[:space:]]*([a-f0-9]{7,40}) ]]; then
             echo "BASE_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
             echo "HEAD_SHA=${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
             echo "REVIEW_MODE=commit_range" >> $GITHUB_OUTPUT
-          else
+            echo "Detected commit range with regex: ${BASH_REMATCH[1]}..${BASH_REMATCH[2]}"
+
+          # Match a single commit
+          elif [[ "$COMMENT" =~ \/bot-review:[[:space:]]+([a-f0-9]{7,40}) ]]; then
+            echo "COMMIT_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            echo "REVIEW_MODE=single_commit" >> $GITHUB_OUTPUT
+            echo "Detected single commit: ${BASH_REMATCH[1]}"
+
+          # Match "/bot-review" or "/bot-review "
+          elif [[ "$COMMENT" =~ ^\/bot-review[[:space:]]*$ ]]; then
             echo "REVIEW_MODE=latest" >> $GITHUB_OUTPUT
+            echo "Detected default review mode"
+
+          # Invalid format
+          else
+            echo "REVIEW_MODE=invalid" >> $GITHUB_OUTPUT
+            echo "Invalid bot-review command format"
           fi
 
+          echo "Parameters output:"
+          cat $GITHUB_OUTPUT
+
       - name: AI Doc Reviewer
-        uses: qiancai/ai-doc-reviewer@main
-        continue-on-error: false
+        uses: qiancai/ai-codereviewer@test-gpt
+        continue-on-error: false  # Ensure workflow fails if the action fails
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           API_PROVIDER: "openai"
           OPENAI_API_KEY: ${{ secrets.OPENAI_API_KEY }}
-          OPENAI_API_MODEL: "gpt-4"
-          exclude: "**/*.json"
+          OPENAI_API_MODEL: "gpt-4"  # Updated model name
+          exclude: "**/*.json"  # Optional: exclude patterns separated by commas
           REVIEW_MODE: ${{ steps.extract.outputs.REVIEW_MODE || 'default' }}
           COMMIT_SHA: ${{ steps.extract.outputs.COMMIT_SHA || '' }}
           BASE_SHA: ${{ steps.extract.outputs.BASE_SHA || '' }}
           HEAD_SHA: ${{ steps.extract.outputs.HEAD_SHA || '' }}
-          ALLOWED_USERS: "username1,username2"
+          PROMPT_PATH: "doc-review-prompt-en.txt"
 ```
 
 ### Using DeepSeek API
@@ -112,26 +137,35 @@ jobs:
 name: AI Doc Review
 
 on:
-  #pull_request:
-  #  types:
-  #    - opened
-  #    - synchronize
-  #    - reopened
+  workflow_dispatch:
+
   issue_comment:
     types:
       - created
 
-permissions: write-all
+permissions:
+  contents: read
+  pull-requests: write
+  issues: write
 
 jobs:
   review:
     runs-on: ubuntu-latest
-    if: |
-      (github.event_name == 'pull_request') || 
-      (github.event_name == 'issue_comment' && 
-       github.event.issue.pull_request && 
-       startsWith(github.event.comment.body, '/bot-review'))
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '/bot-review') &&
+        contains('username1, username2, username3', github.event.comment.user.login)
+      )
     steps:
+      - name: Debug Info
+        run: |
+          echo "Event name: ${{ github.event_name }}"
+          echo "Event type: ${{ github.event.action }}"
+          echo "Comment body: ${{ github.event.comment.body || 'No comment body' }}"
+          echo "Comment author: ${{ github.event.comment.user.login || 'No user' }}"
+
       - name: Checkout Repo
         uses: actions/checkout@v3
         with:
@@ -142,34 +176,52 @@ jobs:
         if: github.event_name == 'issue_comment'
         run: |
           COMMENT="${{ github.event.comment.body }}"
-          if [[ "$COMMENT" =~ /bot-review:\ *([a-fA-F0-9]+) ]]; then
-            echo "COMMIT_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
-            echo "REVIEW_MODE=single_commit" >> $GITHUB_OUTPUT
-          elif [[ "$COMMENT" =~ /bot-review:\ *([a-fA-F0-9]+)\ *\.\.\ *([a-fA-F0-9]+) ]]; then
+          echo "Raw comment: $COMMENT"
+
+          # Match commit range
+          if [[ "$COMMENT" =~ \/bot-review:[[:space:]]*([a-f0-9]{7,40})[[:space:]]*\.\.[[:space:]]*([a-f0-9]{7,40}) ]]; then
             echo "BASE_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
             echo "HEAD_SHA=${BASH_REMATCH[2]}" >> $GITHUB_OUTPUT
             echo "REVIEW_MODE=commit_range" >> $GITHUB_OUTPUT
-          else
+            echo "Detected commit range with regex: ${BASH_REMATCH[1]}..${BASH_REMATCH[2]}"
+
+          # Match a single commit
+          elif [[ "$COMMENT" =~ \/bot-review:[[:space:]]+([a-f0-9]{7,40}) ]]; then
+            echo "COMMIT_SHA=${BASH_REMATCH[1]}" >> $GITHUB_OUTPUT
+            echo "REVIEW_MODE=single_commit" >> $GITHUB_OUTPUT
+            echo "Detected single commit: ${BASH_REMATCH[1]}"
+
+          # Match "/bot-review" or "/bot-review "
+          elif [[ "$COMMENT" =~ ^\/bot-review[[:space:]]*$ ]]; then
             echo "REVIEW_MODE=latest" >> $GITHUB_OUTPUT
+            echo "Detected default review mode"
+
+          # Invalid format
+          else
+            echo "REVIEW_MODE=invalid" >> $GITHUB_OUTPUT
+            echo "Invalid bot-review command format"
           fi
 
+          echo "Parameters output:"
+          cat $GITHUB_OUTPUT
+
       - name: AI Doc Reviewer
-        uses: qiancai/ai-doc-reviewer@main
-        continue-on-error: false
+        uses: qiancai/ai-codereviewer@test-gpt
+        continue-on-error: false  # Ensure workflow fails if the action fails
         with:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          API_PROVIDER: "deepseek"
+          API_PROVIDER: "deepseek"  # or "openai" if you want to use OpenAI
           DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-          DEEPSEEK_API_MODEL: "deepseek-chat"
-          exclude: "**/*.json"
+          DEEPSEEK_API_MODEL: "deepseek-chat"  # Updated model name
+          exclude: "**/*.json"  # Optional: exclude patterns separated by commas
           REVIEW_MODE: ${{ steps.extract.outputs.REVIEW_MODE || 'default' }}
           COMMIT_SHA: ${{ steps.extract.outputs.COMMIT_SHA || '' }}
           BASE_SHA: ${{ steps.extract.outputs.BASE_SHA || '' }}
           HEAD_SHA: ${{ steps.extract.outputs.HEAD_SHA || '' }}
-          ALLOWED_USERS: "username1,username2"
+          PROMPT_PATH: "doc-review-prompt-zh.txt"
 ```
 
-## Configuration Parameters
+## Configuration parameters
 
 | Parameter | Required | Default | Description |
 |-----------|----------|---------|-------------|
@@ -180,15 +232,22 @@ jobs:
 | `DEEPSEEK_API_KEY` | Yes (if using DeepSeek) | N/A | Your DeepSeek API key |
 | `DEEPSEEK_API_MODEL` | No | `deepseek-chat` | DeepSeek model to use |
 | `exclude` | No | N/A | Comma-separated glob patterns for files to exclude |
-| `ALLOWED_USERS` | No | N/A | Comma-separated list of GitHub usernames allowed to trigger manual reviews |
+| `PROMPT_PATH` | No | N/A | Path to the prompt file |
 
-## Triggering PR review via PR comments
+## Customize prompts
 
-You can manually trigger document reviews by adding comments to pull requests. This is useful for re-running reviews after making changes or for reviewing specific commits.
+You can enhance the review performance of the AI Doc Reviewer by providing a custom prompt for your product in a text file and specifying the path in the `PROMPT_PATH` parameter of the `doc_review.yml` file.
 
-### Comment format guidelines
+For example, you can create a `doc-review-prompt.txt` file in the root directory of your repository, and add the content of the prompt to the file based on the following template:
 
-All trigger comments must start with `/bot-review` (with or without a colon).
+- Prompt template for English documentation review: [doc-review-prompt-en.txt](/doc-review-prompt-en.txt)
+- Prompt template for Chinese documentation review: [doc-review-prompt-zh.txt](/doc-review-prompt-zh.txt)
+
+If you does not add any customized prompt, the AI Doc Reviewer will use the default prompt for the review.
+
+### How to trigger a review
+
+You can add the `/bot-review` command in the PR comment to trigger a review.
 
 - **Review the latest PR changes:**
 
@@ -216,11 +275,20 @@ All trigger comments must start with `/bot-review` (with or without a colon).
 
 ### Permission requirements
 
-Only users listed in the `ALLOWED_USERS` parameter in the GitHub Action configuration can trigger document reviews.
+Only users listed in the following condition in the `doc_review.yml` GitHub Action configuration can trigger document reviews.
+
+```yaml
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event_name == 'issue_comment' &&
+        contains(github.event.comment.body, '/bot-review') &&
+        contains('username1, username2, username3', github.event.comment.user.login)
+      )
+```
 
 ### Response
 
-After triggering, the bot will:
+After triggering, the bot will do the following:
 
 1. Start the document review process.
 2. Add a comment on the PR when the review is complete, indicating the results.
@@ -261,7 +329,7 @@ To trigger a review on the latest changes in a PR:
 The bot will start the review. After completion, it will add review comments to specific lines and post a summary:
 
 ```
-✅ Document review completed! Found 5 issues to address.
+✅ AI review completed, 5 comments generated.
 ```
 
 ## Contributing
