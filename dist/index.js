@@ -470,41 +470,10 @@ async function getDeepseekResponse(prompt) {
 function createComment(file, chunk, aiResponses) {
     if (!file.to)
         return [];
-    // Get the actual file path in the PR branch
-    const filePath = file.to; // This is the path relative to the repo root
+    const filePath = file.to;
     console.log(`Processing file: ${filePath}`);
-    // Read file content from the current PR branch (which is already checked out in the GitHub Actions runner)
-    let fileLines = [];
-    let fileReadSuccess = false;
-    try {
-        // Try different path options to locate the file
-        const possiblePaths = [
-            filePath,
-            path_1.default.resolve(process.cwd(), filePath),
-            path_1.default.join(process.cwd(), filePath) // Joined path
-        ];
-        console.log("Current working directory:", process.cwd());
-        console.log("Attempting to find file at these locations:");
-        possiblePaths.forEach(p => console.log(` - ${p} (exists: ${(0, fs_1.existsSync)(p)})`));
-        // Find the first path that exists
-        const existingPath = possiblePaths.find(p => (0, fs_1.existsSync)(p));
-        if (existingPath) {
-            console.log(`Found file at: ${existingPath}`);
-            const fileContent = (0, fs_1.readFileSync)(existingPath, 'utf8');
-            fileLines = fileContent.split('\n');
-            fileReadSuccess = true;
-            console.log(`Successfully read file with ${fileLines.length} lines`);
-            console.log(`First few lines preview: ${fileLines.slice(0, 3).map(l => `"${l}"`).join(', ')}`);
-        }
-        else {
-            console.log(`File not found at any of the expected locations`);
-        }
-    }
-    catch (error) {
-        console.error(`Error reading file: ${error instanceof Error ? error.message : String(error)}`);
-    }
     return aiResponses.map((aiResponse) => {
-        const lineNum = aiResponse.lineNumber;
+        const lineNum = Number(aiResponse.lineNumber);
         console.log(`Processing suggestion for line ${lineNum}`);
         console.log(`Original suggestion: "${aiResponse.suggestion.substring(0, 100)}..."`);
         // Check if the suggestion text already has leading whitespace
@@ -514,29 +483,38 @@ function createComment(file, chunk, aiResponses) {
             return {
                 body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``,
                 path: filePath,
-                line: Number(lineNum),
+                line: lineNum,
             };
         }
-        // Get original line indentation from file
+        // Extract the original line indentation from the diff content
         let originalIndent = '';
-        if (fileReadSuccess) {
-            // Find indentation in the file content for the specific line
-            const lineIndex = Number(lineNum) - 1; // Convert to 0-based index
-            if (lineIndex >= 0 && lineIndex < fileLines.length) {
-                const line = fileLines[lineIndex];
-                console.log(`Original line ${lineNum} content: "${line}"`);
-                const indentMatch = line.match(/^(\s+)/);
-                if (indentMatch) {
-                    originalIndent = indentMatch[0];
-                    console.log(`Found indent for line ${lineNum} from file: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
-                }
-                else {
-                    console.log(`Line ${lineNum} found in file but has no leading whitespace`);
+        // Look for the line in the diff chunks
+        console.log(`Looking for line ${lineNum} in diff chunks`);
+        // Log all changes in the chunk for debugging
+        if (chunk.changes) {
+            console.log(`Chunk has ${chunk.changes.length} changes. Examining for indentation...`);
+            // Examine lines to find the correct indentation
+            for (const change of chunk.changes) {
+                // Get the line number from the change (ln for deletions, ln2 for additions or context)
+                // Use any type assertion to fix TS errors as parse-diff types are incomplete
+                const changeLine = change.ln || change.ln2;
+                if (changeLine === lineNum) {
+                    console.log(`Found the exact line ${lineNum} in diff: "${change.content}"`);
+                    // Extract indentation from the line content in the diff
+                    const indentMatch = change.content.match(/^(\s+)/);
+                    if (indentMatch) {
+                        originalIndent = indentMatch[0];
+                        console.log(`Extracted indentation from diff: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
+                        break;
+                    }
+                    else {
+                        console.log(`Line ${lineNum} found in diff but has no leading whitespace`);
+                    }
                 }
             }
-            else {
-                console.log(`Line ${lineNum} is out of range for file (has ${fileLines.length} lines)`);
-            }
+        }
+        else {
+            console.log(`No changes found in chunk`);
         }
         // Apply indentation to suggestion text
         let suggestionText = aiResponse.suggestion;
@@ -556,7 +534,7 @@ function createComment(file, chunk, aiResponses) {
         return {
             body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``,
             path: filePath,
-            line: Number(lineNum),
+            line: lineNum,
         };
     });
 }
