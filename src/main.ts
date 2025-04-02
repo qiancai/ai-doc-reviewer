@@ -184,6 +184,7 @@ function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): {prompt: 
       const indentMatch = change.content.match(/^(\s+)/);
       if (indentMatch) {
         lineIndents[lineNum] = indentMatch[1];
+        console.log(`Recorded indent for line ${lineNum}: '${indentMatch[1].replace(/ /g, '·')}'`); // Log with visible spaces for debugging
       }
     }
   });
@@ -526,6 +527,8 @@ function createComment(
   }>,
   lineIndents: Record<string, string> = {}
 ): Array<{ body: string; path: string; line: number }> {
+  console.log(`Creating comments for file ${file.to}, with indent data for ${Object.keys(lineIndents).length} lines`);
+  
   return aiResponses.map((aiResponse: { lineNumber: string; reviewComment: string; suggestion: string }) => {
     if (!file.to) {
       return [];
@@ -533,23 +536,34 @@ function createComment(
     
     // Get the original indentation for this line
     const lineNum = aiResponse.lineNumber;
-    const originalIndent = lineIndents[lineNum] || '';
+    console.log(`Processing suggestion for line ${lineNum}`);
+    console.log(`Original suggestion: "${aiResponse.suggestion.substring(0, 50)}..."`);
     
-    // Check if suggestion text already has proper indentation
-    let suggestionText = aiResponse.suggestion;
-    
-    // Only add indentation if it doesn't already have it and there is original indentation to add
-    if (originalIndent && !suggestionText.startsWith(originalIndent)) {
-      // Add back original indentation while preserving any markdown syntax
+    // Check if we have indent data for this line
+    const originalIndent = lineIndents[lineNum];
+    if (originalIndent) {
+      console.log(`Found indent for line ${lineNum}: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
+      
+      // Check if suggestion text already has proper indentation
+      let suggestionText = aiResponse.suggestion;
+      
+      // Always add the indentation - the API response doesn't preserve spaces
       suggestionText = originalIndent + suggestionText.trimStart();
-      console.log(`Restored indentation for line ${lineNum}: '${originalIndent}'`);
+      console.log(`Added indentation for line ${lineNum}. Result: '${suggestionText.substring(0, Math.min(50, suggestionText.length))}...'`);
+      
+      return {
+        body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``,
+        path: file.to,
+        line: Number(lineNum),
+      };
+    } else {
+      console.log(`No indent found for line ${lineNum}, using suggestion as-is`);
+      return {
+        body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``,
+        path: file.to,
+        line: Number(lineNum),
+      };
     }
-    
-    return {
-      body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``, //use four backticks to wrap the suggestion because the response itself might contain code blocks in it
-      path: file.to,
-      line: Number(aiResponse.lineNumber),
-    };
   }).flat();
 }
 
