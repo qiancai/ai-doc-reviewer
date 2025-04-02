@@ -498,10 +498,10 @@ function createComment(file, chunk, aiResponses) {
                 // Get the line number from the change (ln for deletions, ln2 for additions or context)
                 // Use any type assertion to fix TS errors as parse-diff types are incomplete
                 const changeLine = change.ln || change.ln2;
-                if (changeLine === lineNum) {
+                // Only look at addition lines (starting with +) to get indentation
+                if (changeLine === lineNum && change.content.startsWith('+')) {
                     console.log(`Found the exact line ${lineNum} in diff: "${change.content}"`);
-                    // In diff format, the first character is + (addition), - (deletion), or space (context)
-                    // We need to remove this character before checking for indentation
+                    // Remove the + character before checking for indentation
                     const contentWithoutDiffMarker = change.content.substring(1);
                     console.log(`Content after removing diff marker: "${contentWithoutDiffMarker}"`);
                     // Extract indentation from the line content after removing diff marker
