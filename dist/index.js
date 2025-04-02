@@ -470,12 +470,31 @@ async function getDeepseekResponse(prompt) {
 function createComment(file, chunk, aiResponses) {
     if (!file.to)
         return [];
-    const filePath = file.to; // 保存为变量以确保TypeScript知道它不可能是undefined
+    const filePath = file.to; // Save as a variable to ensure TypeScript knows it can't be undefined
     console.log(`Creating comments for file ${filePath}`);
+    // Read file content from the current PR branch
+    let fileLines = [];
+    let fileReadSuccess = false;
+    try {
+        if ((0, fs_1.existsSync)(filePath)) {
+            console.log(`Reading file from PR branch: ${filePath}`);
+            const fileContent = (0, fs_1.readFileSync)(filePath, 'utf8');
+            fileLines = fileContent.split('\n');
+            fileReadSuccess = true;
+            console.log(`Successfully read file with ${fileLines.length} lines`);
+        }
+        else {
+            console.log(`File not found at ${filePath}`);
+        }
+    }
+    catch (error) {
+        console.error(`Error reading file: ${error instanceof Error ? error.message : String(error)}`);
+    }
     return aiResponses.map((aiResponse) => {
         const lineNum = aiResponse.lineNumber;
         console.log(`Processing suggestion for line ${lineNum}`);
         console.log(`Original suggestion: "${aiResponse.suggestion.substring(0, 100)}..."`);
+        // Check if the suggestion text already has leading whitespace
         const suggestionHasLeadingSpace = aiResponse.suggestion.match(/^\s+/);
         if (suggestionHasLeadingSpace) {
             console.log(`Suggestion already has leading space: '${suggestionHasLeadingSpace[0].replace(/ /g, '·')}'`);
@@ -485,51 +504,40 @@ function createComment(file, chunk, aiResponses) {
                 line: Number(lineNum),
             };
         }
-        // Find the original line by reading directly from the file
+        // Get original line indentation from file
         let originalIndent = '';
-        let lineFound = false;
-        try {
-            if ((0, fs_1.existsSync)(filePath)) {
-                console.log(`Reading file: ${filePath}`);
-                const fileContent = (0, fs_1.readFileSync)(filePath, 'utf8');
-                const lines = fileContent.split('\n');
-                // Line numbers are 1-based, so adjust for 0-based array
-                const lineIndex = Number(lineNum) - 1;
-                if (lineIndex >= 0 && lineIndex < lines.length) {
-                    const line = lines[lineIndex];
-                    console.log(`Found line ${lineNum} content: "${line.substring(0, 50)}${line.length > 50 ? '...' : ''}"`);
-                    const indentMatch = line.match(/^(\s+)/);
-                    if (indentMatch) {
-                        originalIndent = indentMatch[0]; // 使用完整匹配而不是捕获组
-                        console.log(`Found indent for line ${lineNum}: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
-                        lineFound = true;
-                    }
-                    else {
-                        console.log(`Line ${lineNum} found in file but has no leading whitespace`);
-                    }
+        if (fileReadSuccess) {
+            // Find indentation in the file content for the specific line
+            const lineIndex = Number(lineNum) - 1; // Convert to 0-based index
+            if (lineIndex >= 0 && lineIndex < fileLines.length) {
+                const line = fileLines[lineIndex];
+                const indentMatch = line.match(/^(\s+)/);
+                if (indentMatch) {
+                    originalIndent = indentMatch[0];
+                    console.log(`Found indent for line ${lineNum} from file: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
                 }
                 else {
-                    console.log(`Line ${lineNum} is out of range for file (has ${lines.length} lines)`);
+                    console.log(`Line ${lineNum} found in file but has no leading whitespace`);
                 }
             }
             else {
-                console.log(`File not found at ${filePath}`);
+                console.log(`Line ${lineNum} is out of range for file (has ${fileLines.length} lines)`);
             }
         }
-        catch (error) {
-            console.error(`Error reading file: ${error instanceof Error ? error.message : String(error)}`);
-        }
-        // Apply indentation to suggestion if found and needed
+        // Apply indentation to suggestion text
         let suggestionText = aiResponse.suggestion;
-        if (originalIndent && !suggestionText.startsWith(originalIndent)) {
-            suggestionText = originalIndent + suggestionText.trimStart();
-            console.log(`Added indentation for line ${lineNum}. Result: '${suggestionText.substring(0, Math.min(50, suggestionText.length))}...'`);
-        }
-        else if (!originalIndent) {
-            console.log(`No indent found for line ${lineNum}, using suggestion as-is`);
+        if (originalIndent) {
+            // If suggestion doesn't start with the original indentation, add it
+            if (!suggestionText.startsWith(originalIndent)) {
+                suggestionText = originalIndent + suggestionText.trimStart();
+                console.log(`Added indentation for line ${lineNum}. Result: '${suggestionText.substring(0, Math.min(50, suggestionText.length))}...'`);
+            }
+            else {
+                console.log(`Suggestion already has correct indentation, keeping as-is`);
+            }
         }
         else {
-            console.log(`Suggestion already has correct indentation, keeping as-is`);
+            console.log(`No indent found for line ${lineNum}, using suggestion as-is`);
         }
         return {
             body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``,
