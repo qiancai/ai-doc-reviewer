@@ -549,14 +549,20 @@ function createComment(
         
         if (changeLine === lineNum) {
           console.log(`Found the exact line ${lineNum} in diff: "${change.content}"`);
-          // Extract indentation from the line content in the diff
-          const indentMatch = change.content.match(/^(\s+)/);
+          
+          // In diff format, the first character is + (addition), - (deletion), or space (context)
+          // We need to remove this character before checking for indentation
+          const contentWithoutDiffMarker = change.content.substring(1);
+          console.log(`Content after removing diff marker: "${contentWithoutDiffMarker}"`);
+          
+          // Extract indentation from the line content after removing diff marker
+          const indentMatch = contentWithoutDiffMarker.match(/^(\s+)/);
           if (indentMatch) {
             originalIndent = indentMatch[0];
             console.log(`Extracted indentation from diff: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
             break;
           } else {
-            console.log(`Line ${lineNum} found in diff but has no leading whitespace`);
+            console.log(`Line ${lineNum} found in diff but has no leading whitespace after diff marker`);
           }
         }
       }
