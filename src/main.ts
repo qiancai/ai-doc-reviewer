@@ -513,22 +513,38 @@ function createComment(
 ): Array<{ body: string; path: string; line: number }> {
   if (!file.to) return [];
   
-  const filePath = file.to; // Save as a variable to ensure TypeScript knows it can't be undefined
-  console.log(`Creating comments for file ${filePath}`);
+  // Get the actual file path in the PR branch
+  const filePath = file.to; // This is the path relative to the repo root
+  console.log(`Processing file: ${filePath}`);
   
-  // Read file content from the current PR branch
+  // Read file content from the current PR branch (which is already checked out in the GitHub Actions runner)
   let fileLines: string[] = [];
   let fileReadSuccess = false;
   
   try {
-    if (existsSync(filePath)) {
-      console.log(`Reading file from PR branch: ${filePath}`);
-      const fileContent = readFileSync(filePath, 'utf8');
+    // Try different path options to locate the file
+    const possiblePaths = [
+      filePath,                              // Direct path
+      path.resolve(process.cwd(), filePath), // Absolute path from working directory
+      path.join(process.cwd(), filePath)     // Joined path
+    ];
+    
+    console.log("Current working directory:", process.cwd());
+    console.log("Attempting to find file at these locations:");
+    possiblePaths.forEach(p => console.log(` - ${p} (exists: ${existsSync(p)})`));
+    
+    // Find the first path that exists
+    const existingPath = possiblePaths.find(p => existsSync(p));
+    
+    if (existingPath) {
+      console.log(`Found file at: ${existingPath}`);
+      const fileContent = readFileSync(existingPath, 'utf8');
       fileLines = fileContent.split('\n');
       fileReadSuccess = true;
       console.log(`Successfully read file with ${fileLines.length} lines`);
+      console.log(`First few lines preview: ${fileLines.slice(0, 3).map(l => `"${l}"`).join(', ')}`);
     } else {
-      console.log(`File not found at ${filePath}`);
+      console.log(`File not found at any of the expected locations`);
     }
   } catch (error) {
     console.error(`Error reading file: ${error instanceof Error ? error.message : String(error)}`);
@@ -558,6 +574,7 @@ function createComment(
       const lineIndex = Number(lineNum) - 1; // Convert to 0-based index
       if (lineIndex >= 0 && lineIndex < fileLines.length) {
         const line = fileLines[lineIndex];
+        console.log(`Original line ${lineNum} content: "${line}"`);
         const indentMatch = line.match(/^(\s+)/);
         if (indentMatch) {
           originalIndent = indentMatch[0];
