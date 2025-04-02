@@ -145,7 +145,7 @@ async function analyzeCode(
   for (const file of parsedDiff) {
     if (file.to === "/dev/null") continue; // Ignore deleted files
     for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails);
+      const { prompt, lineIndents } = createPrompt(file, chunk, prDetails);
       
       // Get starting line number safely by checking the type of change
       const firstChange = chunk.changes[0] || {};
@@ -161,7 +161,7 @@ async function analyzeCode(
       
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
-        const newComments = createComment(file, chunk, aiResponse);
+        const newComments = createComment(file, chunk, aiResponse, lineIndents);
         if (newComments) {
           comments.push(...newComments);
         }
@@ -171,7 +171,23 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
+function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): {prompt: string, lineIndents: Record<string, string>} {
+  // Create an object to store indentation for each line
+  const lineIndents: Record<string, string> = {};
+  
+  // Process each line in the diff to record leading whitespace
+  chunk.changes.forEach(change => {
+    // @ts-expect-error - ln and ln2 exists where needed
+    const lineNum = change.ln || change.ln2;
+    if (lineNum && change.content) {
+      // Match leading whitespace
+      const indentMatch = change.content.match(/^(\s+)/);
+      if (indentMatch) {
+        lineIndents[lineNum] = indentMatch[1];
+      }
+    }
+  });
+
   // Default prompt template that will be used if the file doesn't exist
   const defaultPromptTemplate = `As a technical writer who has profound knowledge, your task is to review pull requests of user documentation.
 
@@ -239,7 +255,7 @@ Git diff to review:
           .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
           .join("\n"));
       
-      return template;
+      return { prompt: template, lineIndents };
     } catch (fileError) {
       // File doesn't exist or can't be read, fall back to default prompt
       console.log(`⚠️ Custom prompt file not found at: ${templatePath}. Using default prompt.`);
@@ -259,7 +275,7 @@ Git diff to review:
           .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
           .join("\n"));
       
-      return template;
+      return { prompt: template, lineIndents };
     }
   } catch (error) {
     console.error(`Error in createPrompt:`, error);
@@ -507,14 +523,30 @@ function createComment(
     lineNumber: string;
     reviewComment: string;
     suggestion: string;
-  }>
+  }>,
+  lineIndents: Record<string, string> = {}
 ): Array<{ body: string; path: string; line: number }> {
   return aiResponses.map((aiResponse: { lineNumber: string; reviewComment: string; suggestion: string }) => {
     if (!file.to) {
       return [];
     }
+    
+    // Get the original indentation for this line
+    const lineNum = aiResponse.lineNumber;
+    const originalIndent = lineIndents[lineNum] || '';
+    
+    // Check if suggestion text already has proper indentation
+    let suggestionText = aiResponse.suggestion;
+    
+    // Only add indentation if it doesn't already have it and there is original indentation to add
+    if (originalIndent && !suggestionText.startsWith(originalIndent)) {
+      // Add back original indentation while preserving any markdown syntax
+      suggestionText = originalIndent + suggestionText.trimStart();
+      console.log(`Restored indentation for line ${lineNum}: '${originalIndent}'`);
+    }
+    
     return {
-      body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``, //use four backticks to wrap the suggestion because the response itself might contain code blocks in it
+      body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``, //use four backticks to wrap the suggestion because the response itself might contain code blocks in it
       path: file.to,
       line: Number(aiResponse.lineNumber),
     };

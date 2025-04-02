@@ -145,7 +145,7 @@ async function analyzeCode(parsedDiff, prDetails) {
         if (file.to === "/dev/null")
             continue; // Ignore deleted files
         for (const chunk of file.chunks) {
-            const prompt = createPrompt(file, chunk, prDetails);
+            const { prompt, lineIndents } = createPrompt(file, chunk, prDetails);
             // Get starting line number safely by checking the type of change
             const firstChange = chunk.changes[0] || {};
             let startLine = 'unknown';
@@ -159,7 +159,7 @@ async function analyzeCode(parsedDiff, prDetails) {
             console.log(`AI Prompt preview (first 500 chars): ${prompt.substring(0, 500)}...`);
             const aiResponse = await getAIResponse(prompt);
             if (aiResponse) {
-                const newComments = createComment(file, chunk, aiResponse);
+                const newComments = createComment(file, chunk, aiResponse, lineIndents);
                 if (newComments) {
                     comments.push(...newComments);
                 }
@@ -169,6 +169,20 @@ async function analyzeCode(parsedDiff, prDetails) {
     return comments;
 }
 function createPrompt(file, chunk, prDetails) {
+    // Create an object to store indentation for each line
+    const lineIndents = {};
+    // Process each line in the diff to record leading whitespace
+    chunk.changes.forEach(change => {
+        // @ts-expect-error - ln and ln2 exists where needed
+        const lineNum = change.ln || change.ln2;
+        if (lineNum && change.content) {
+            // Match leading whitespace
+            const indentMatch = change.content.match(/^(\s+)/);
+            if (indentMatch) {
+                lineIndents[lineNum] = indentMatch[1];
+            }
+        }
+    });
     // Default prompt template that will be used if the file doesn't exist
     const defaultPromptTemplate = `As a technical writer who has profound knowledge, your task is to review pull requests of user documentation.
 
@@ -232,7 +246,7 @@ Git diff to review:
                 // @ts-expect-error - ln and ln2 exists where needed
                 .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
                 .join("\n"));
-            return template;
+            return { prompt: template, lineIndents };
         }
         catch (fileError) {
             // File doesn't exist or can't be read, fall back to default prompt
@@ -250,7 +264,7 @@ Git diff to review:
                 // @ts-expect-error - ln and ln2 exists where needed
                 .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
                 .join("\n"));
-            return template;
+            return { prompt: template, lineIndents };
         }
     }
     catch (error) {
@@ -466,13 +480,24 @@ async function getDeepseekResponse(prompt) {
         return null;
     }
 }
-function createComment(file, chunk, aiResponses) {
+function createComment(file, chunk, aiResponses, lineIndents = {}) {
     return aiResponses.map((aiResponse) => {
         if (!file.to) {
             return [];
         }
+        // Get the original indentation for this line
+        const lineNum = aiResponse.lineNumber;
+        const originalIndent = lineIndents[lineNum] || '';
+        // Check if suggestion text already has proper indentation
+        let suggestionText = aiResponse.suggestion;
+        // Only add indentation if it doesn't already have it and there is original indentation to add
+        if (originalIndent && !suggestionText.startsWith(originalIndent)) {
+            // Add back original indentation while preserving any markdown syntax
+            suggestionText = originalIndent + suggestionText.trimStart();
+            console.log(`Restored indentation for line ${lineNum}: '${originalIndent}'`);
+        }
         return {
-            body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``,
+            body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``,
             path: file.to,
             line: Number(aiResponse.lineNumber),
         };
