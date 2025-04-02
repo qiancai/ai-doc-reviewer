@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import * as core from "@actions/core";
 import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
@@ -143,9 +143,11 @@ async function analyzeCode(
   }
 
   for (const file of parsedDiff) {
-    if (file.to === "/dev/null") continue; // Ignore deleted files
+    const filePath = file.to;
+    if (!filePath || filePath === "/dev/null") continue; // Ignore deleted files and files without path
+    
     for (const chunk of file.chunks) {
-      const prompt = createPrompt(file, chunk, prDetails);
+      const { prompt } = createPrompt(file, chunk, prDetails);
       
       // Get starting line number safely by checking the type of change
       const firstChange = chunk.changes[0] || {};
@@ -156,7 +158,7 @@ async function analyzeCode(
         startLine = String(firstChange.ln2);
       }
       
-      console.log(`Sending to AI - File: ${file.to}, Chunk starting at line: ${startLine}`);
+      console.log(`Sending to AI - File: ${filePath}, Chunk starting at line: ${startLine}`);
       console.log(`AI Prompt preview (first 500 chars): ${prompt.substring(0, 500)}...`);
       
       const aiResponse = await getAIResponse(prompt);
@@ -171,7 +173,7 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): string {
+function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): {prompt: string} {
   // Default prompt template that will be used if the file doesn't exist
   const defaultPromptTemplate = `As a technical writer who has profound knowledge, your task is to review pull requests of user documentation.
 
@@ -239,7 +241,7 @@ Git diff to review:
           .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
           .join("\n"));
       
-      return template;
+      return { prompt: template };
     } catch (fileError) {
       // File doesn't exist or can't be read, fall back to default prompt
       console.log(`⚠️ Custom prompt file not found at: ${templatePath}. Using default prompt.`);
@@ -259,7 +261,7 @@ Git diff to review:
           .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
           .join("\n"));
       
-      return template;
+      return { prompt: template };
     }
   } catch (error) {
     console.error(`Error in createPrompt:`, error);
@@ -509,16 +511,85 @@ function createComment(
     suggestion: string;
   }>
 ): Array<{ body: string; path: string; line: number }> {
+  if (!file.to) return [];
+  
+  const filePath = file.to;
+  console.log(`Processing file: ${filePath}`);
+  
   return aiResponses.map((aiResponse: { lineNumber: string; reviewComment: string; suggestion: string }) => {
-    if (!file.to) {
-      return [];
+    const lineNum = Number(aiResponse.lineNumber);
+    console.log(`Processing suggestion for line ${lineNum}`);
+    console.log(`Original suggestion: "${aiResponse.suggestion.substring(0, 100)}..."`);
+    
+    // Check if the suggestion text already has leading whitespace
+    const suggestionHasLeadingSpace = aiResponse.suggestion.match(/^\s+/);
+    if (suggestionHasLeadingSpace) {
+      console.log(`Suggestion already has leading space: '${suggestionHasLeadingSpace[0].replace(/ /g, '·')}'`);
+      return {
+        body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``,
+        path: filePath,
+        line: lineNum,
+      };
     }
+    
+    // Extract the original line indentation from the diff content
+    let originalIndent = '';
+    
+    // Look for the line in the diff chunks
+    console.log(`Looking for line ${lineNum} in diff chunks`);
+    // Log all changes in the chunk for debugging
+    if (chunk.changes) {
+      console.log(`Chunk has ${chunk.changes.length} changes. Examining for indentation...`);
+      
+      // Examine lines to find the correct indentation
+      for (const change of chunk.changes) {
+        // Get the line number from the change (ln for deletions, ln2 for additions or context)
+        // Use any type assertion to fix TS errors as parse-diff types are incomplete
+        const changeLine = (change as any).ln || (change as any).ln2;
+        
+        // Only look at addition lines (starting with +) to get indentation
+        if (changeLine === lineNum && change.content.startsWith('+')) {
+          console.log(`Found the exact line ${lineNum} in diff: "${change.content}"`);
+          
+          // Remove the + character before checking for indentation
+          const contentWithoutDiffMarker = change.content.substring(1);
+          console.log(`Content after removing diff marker: "${contentWithoutDiffMarker}"`);
+          
+          // Extract indentation from the line content after removing diff marker
+          const indentMatch = contentWithoutDiffMarker.match(/^(\s+)/);
+          if (indentMatch) {
+            originalIndent = indentMatch[0];
+            console.log(`Extracted indentation from diff: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
+            break;
+          } else {
+            console.log(`Line ${lineNum} found in diff but has no leading whitespace after diff marker`);
+          }
+        }
+      }
+    } else {
+      console.log(`No changes found in chunk`);
+    }
+    
+    // Apply indentation to suggestion text
+    let suggestionText = aiResponse.suggestion;
+    if (originalIndent) {
+      // If suggestion doesn't start with the original indentation, add it
+      if (!suggestionText.startsWith(originalIndent)) {
+        suggestionText = originalIndent + suggestionText.trimStart();
+        console.log(`Added indentation for line ${lineNum}. Result: '${suggestionText.substring(0, Math.min(50, suggestionText.length))}...'`);
+      } else {
+        console.log(`Suggestion already has correct indentation, keeping as-is`);
+      }
+    } else {
+      console.log(`No indent found for line ${lineNum}, using suggestion as-is`);
+    }
+    
     return {
-      body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``, //use four backticks to wrap the suggestion because the response itself might contain code blocks in it
-      path: file.to,
-      line: Number(aiResponse.lineNumber),
+      body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``,
+      path: filePath,
+      line: lineNum,
     };
-  }).flat();
+  });
 }
 
 async function createReviewComment(
