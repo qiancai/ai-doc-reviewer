@@ -143,9 +143,11 @@ async function analyzeCode(
   }
 
   for (const file of parsedDiff) {
-    if (file.to === "/dev/null") continue; // Ignore deleted files
+    const filePath = file.to;
+    if (!filePath || filePath === "/dev/null") continue; // Ignore deleted files and files without path
+    
     for (const chunk of file.chunks) {
-      const { prompt, lineIndents } = createPrompt(file, chunk, prDetails);
+      const { prompt } = createPrompt(file, chunk, prDetails);
       
       // Get starting line number safely by checking the type of change
       const firstChange = chunk.changes[0] || {};
@@ -156,12 +158,12 @@ async function analyzeCode(
         startLine = String(firstChange.ln2);
       }
       
-      console.log(`Sending to AI - File: ${file.to}, Chunk starting at line: ${startLine}`);
+      console.log(`Sending to AI - File: ${filePath}, Chunk starting at line: ${startLine}`);
       console.log(`AI Prompt preview (first 500 chars): ${prompt.substring(0, 500)}...`);
       
       const aiResponse = await getAIResponse(prompt);
       if (aiResponse) {
-        const newComments = createComment(file, chunk, aiResponse, lineIndents);
+        const newComments = createComment(file, chunk, aiResponse);
         if (newComments) {
           comments.push(...newComments);
         }
@@ -171,24 +173,7 @@ async function analyzeCode(
   return comments;
 }
 
-function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): {prompt: string, lineIndents: Record<string, string>} {
-  // Create an object to store indentation for each line
-  const lineIndents: Record<string, string> = {};
-  
-  // Process each line in the diff to record leading whitespace
-  chunk.changes.forEach(change => {
-    // @ts-expect-error - ln and ln2 exists where needed
-    const lineNum = change.ln || change.ln2;
-    if (lineNum && change.content) {
-      // Match leading whitespace
-      const indentMatch = change.content.match(/^(\s+)/);
-      if (indentMatch) {
-        lineIndents[lineNum] = indentMatch[1];
-        console.log(`Recorded indent for line ${lineNum}: '${indentMatch[1].replace(/ /g, '·')}'`); // Log with visible spaces for debugging
-      }
-    }
-  });
-
+function createPrompt(file: File, chunk: Chunk, prDetails: PRDetails): {prompt: string} {
   // Default prompt template that will be used if the file doesn't exist
   const defaultPromptTemplate = `As a technical writer who has profound knowledge, your task is to review pull requests of user documentation.
 
@@ -256,7 +241,7 @@ Git diff to review:
           .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
           .join("\n"));
       
-      return { prompt: template, lineIndents };
+      return { prompt: template };
     } catch (fileError) {
       // File doesn't exist or can't be read, fall back to default prompt
       console.log(`⚠️ Custom prompt file not found at: ${templatePath}. Using default prompt.`);
@@ -276,7 +261,7 @@ Git diff to review:
           .map((c) => `${c.ln ? c.ln : c.ln2} ${c.content}`)
           .join("\n"));
       
-      return { prompt: template, lineIndents };
+      return { prompt: template };
     }
   } catch (error) {
     console.error(`Error in createPrompt:`, error);
@@ -524,47 +509,52 @@ function createComment(
     lineNumber: string;
     reviewComment: string;
     suggestion: string;
-  }>,
-  lineIndents: Record<string, string> = {}
+  }>
 ): Array<{ body: string; path: string; line: number }> {
-  console.log(`Creating comments for file ${file.to}, with indent data for ${Object.keys(lineIndents).length} lines`);
+  if (!file.to) return [];
+  
+  const filePath = file.to; // 保存为变量以确保TypeScript知道它不可能是undefined
+  console.log(`Creating comments for file ${filePath}`);
   
   return aiResponses.map((aiResponse: { lineNumber: string; reviewComment: string; suggestion: string }) => {
-    if (!file.to) {
-      return [];
-    }
-    
-    // Get the original indentation for this line
     const lineNum = aiResponse.lineNumber;
     console.log(`Processing suggestion for line ${lineNum}`);
     console.log(`Original suggestion: "${aiResponse.suggestion.substring(0, 50)}..."`);
     
-    // Check if we have indent data for this line
-    const originalIndent = lineIndents[lineNum];
+    // Find the original line in the chunk changes to extract indentation
+    let originalIndent = '';
+    for (const change of chunk.changes) {
+      // @ts-expect-error - ln and ln2 exists where needed
+      const changeLine = change.ln || change.ln2;
+      if (changeLine === Number(lineNum) && change.content) {
+        // Match leading whitespace
+        const indentMatch = change.content.match(/^(\s+)/);
+        if (indentMatch) {
+          originalIndent = indentMatch[1];
+          console.log(`Found indent for line ${lineNum}: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
+        }
+        break;
+      }
+    }
+    
+    // Apply indentation to suggestion if found
+    let suggestionText = aiResponse.suggestion;
     if (originalIndent) {
-      console.log(`Found indent for line ${lineNum}: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
-      
-      // Check if suggestion text already has proper indentation
-      let suggestionText = aiResponse.suggestion;
-      
-      // Always add the indentation - the API response doesn't preserve spaces
-      suggestionText = originalIndent + suggestionText.trimStart();
-      console.log(`Added indentation for line ${lineNum}. Result: '${suggestionText.substring(0, Math.min(50, suggestionText.length))}...'`);
-      
-      return {
-        body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``,
-        path: file.to,
-        line: Number(lineNum),
-      };
+      // Check if suggestion already has proper indentation
+      if (!suggestionText.startsWith(originalIndent)) {
+        suggestionText = originalIndent + suggestionText.trimStart();
+        console.log(`Added indentation for line ${lineNum}. Result: '${suggestionText.substring(0, Math.min(50, suggestionText.length))}...'`);
+      }
     } else {
       console.log(`No indent found for line ${lineNum}, using suggestion as-is`);
-      return {
-        body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${aiResponse.suggestion}\n\`\`\`\``,
-        path: file.to,
-        line: Number(lineNum),
-      };
     }
-  }).flat();
+    
+    return {
+      body: `${aiResponse.reviewComment}\n\n\`\`\`\`suggestion\n${suggestionText}\n\`\`\`\``,
+      path: filePath,
+      line: Number(lineNum),
+    };
+  });
 }
 
 async function createReviewComment(
