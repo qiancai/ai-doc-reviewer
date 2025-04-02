@@ -1,4 +1,4 @@
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import * as core from "@actions/core";
 import OpenAI from "openai";
 import { Octokit } from "@octokit/rest";
@@ -521,50 +521,37 @@ function createComment(
     console.log(`Processing suggestion for line ${lineNum}`);
     console.log(`Original suggestion: "${aiResponse.suggestion.substring(0, 50)}..."`);
     
-    // Find the original line in ALL chunks of the file to extract indentation
+    // Find the original line by reading directly from the file
     let originalIndent = '';
     let lineFound = false;
     
-    // First try the current chunk (most likely location)
-    for (const change of chunk.changes) {
-      // @ts-expect-error - ln and ln2 exists where needed
-      const changeLine = change.ln || change.ln2;
-      if (changeLine === Number(lineNum) && change.content) {
-        // Match leading whitespace
-        const indentMatch = change.content.match(/^(\s+)/);
-        if (indentMatch) {
-          originalIndent = indentMatch[1];
-          console.log(`Found indent for line ${lineNum} in current chunk: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
-          lineFound = true;
-        }
-        break;
-      }
-    }
-    
-    // If not found in current chunk, search all chunks in the file
-    if (!lineFound && file.chunks) {
-      console.log(`Line ${lineNum} not found in current chunk, searching all chunks...`);
-      for (const otherChunk of file.chunks) {
-        // Skip the current chunk as we already searched it
-        if (otherChunk === chunk) continue;
+    try {
+      // Check if the file exists in the current directory
+      if (existsSync(filePath)) {
+        console.log(`Reading indentation for line ${lineNum} from file: ${filePath}`);
+        const fileContent = readFileSync(filePath, 'utf8');
+        const lines = fileContent.split('\n');
         
-        for (const change of otherChunk.changes) {
-          // @ts-expect-error - ln and ln2 exists where needed
-          const changeLine = change.ln || change.ln2;
-          if (changeLine === Number(lineNum) && change.content) {
-            // Match leading whitespace
-            const indentMatch = change.content.match(/^(\s+)/);
-            if (indentMatch) {
-              originalIndent = indentMatch[1];
-              console.log(`Found indent for line ${lineNum} in different chunk: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
-              lineFound = true;
-            }
-            break;
+        // Line numbers are 1-based, so adjust for 0-based array
+        const lineIndex = Number(lineNum) - 1;
+        if (lineIndex >= 0 && lineIndex < lines.length) {
+          const line = lines[lineIndex];
+          const indentMatch = line.match(/^(\s+)/);
+          if (indentMatch) {
+            originalIndent = indentMatch[1];
+            console.log(`Found indent for line ${lineNum} in file: '${originalIndent.replace(/ /g, '·')}' (${originalIndent.length} spaces)`);
+            lineFound = true;
+          } else {
+            console.log(`Line ${lineNum} found in file but has no leading whitespace`);
           }
+        } else {
+          console.log(`Line ${lineNum} is out of range for file (has ${lines.length} lines)`);
         }
-        
-        if (lineFound) break; // Stop searching other chunks if found
+      } else {
+        console.log(`File not found at ${filePath}, cannot read original indentation`);
       }
+    } catch (error) {
+      console.error(`Error reading file to find indentation: ${error instanceof Error ? error.message : String(error)}`);
     }
     
     // Apply indentation to suggestion if found
